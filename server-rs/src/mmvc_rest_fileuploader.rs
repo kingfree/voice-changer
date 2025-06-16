@@ -278,9 +278,11 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::mmvc_rest::MMVCRest;
+    use crate::test_util::cleanup_test_dirs;
     use crate::voice_changer_params::VoiceChangerParams; // for constructing manager
+    use serial_test::serial;
 
-    fn app() -> Router {
+    fn app() -> (Router, &'static VoiceChangerManager) {
         let params = VoiceChangerParams {
             model_dir: "m".into(),
             content_vec_500: "".into(),
@@ -300,12 +302,13 @@ mod tests {
         let manager = VoiceChangerManager::get_instance(params);
         #[cfg(test)]
         manager.reset();
-        MMVCRestFileuploader::new(manager).router()
+        (MMVCRestFileuploader::new(manager).router(), manager)
     }
 
     #[tokio::test]
+    #[serial]
     async fn info_endpoint_returns_status() {
-        let app = app();
+        let (app, manager) = app();
         let response = app
             .oneshot(
                 Request::builder()
@@ -321,11 +324,14 @@ mod tests {
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["status"], "OK");
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]
+    #[serial]
     async fn update_settings_endpoint_changes_value() {
-        let app = app();
+        let (app, manager) = app();
         let payload = "key=modelSlotIndex&val=1";
         let response = app
             .oneshot(
@@ -342,11 +348,14 @@ mod tests {
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["settings"]["model_slot_index"], 1);
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]
+    #[serial]
     async fn performance_endpoint_returns_values() {
-        let app = app();
+        let (app, manager) = app();
         let response = app
             .oneshot(
                 Request::builder()
@@ -362,11 +371,14 @@ mod tests {
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["status"], "OK");
         assert!(v["performance"].as_array().unwrap().len() >= 3);
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]
+    #[serial]
     async fn onnx_endpoint_exports_model() {
-        let app = app();
+        let (app, manager) = app();
         let response = app
             .oneshot(
                 Request::builder()
@@ -381,12 +393,15 @@ mod tests {
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert!(v["exported"].as_bool().unwrap());
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]
+    #[serial]
     async fn upload_and_concat_files() {
         use hyper::header::{HeaderValue, CONTENT_TYPE};
-        let app = app();
+        let (app, manager) = app();
 
         let boundary = "BOUNDARY";
         // upload first chunk
@@ -442,12 +457,15 @@ mod tests {
         let target = std::path::Path::new(UPLOAD_DIR).join("final.txt");
         let content = tokio::fs::read_to_string(&target).await.unwrap();
         assert_eq!(content, "helloworld");
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]
+    #[serial]
     async fn merge_model_endpoint_creates_file() {
         use serde_json::json;
-        let app = app();
+        let (app, manager) = app();
         let f1 = std::path::Path::new(crate::constants::TMP_DIR).join("ma.txt");
         let f2 = std::path::Path::new(crate::constants::TMP_DIR).join("mb.txt");
         tokio::fs::create_dir_all(crate::constants::TMP_DIR)
@@ -476,5 +494,7 @@ mod tests {
         assert!(out.exists());
         let content = tokio::fs::read_to_string(&out).await.unwrap();
         assert_eq!(content, "ab");
+        manager.reset();
+        cleanup_test_dirs();
     }
 }

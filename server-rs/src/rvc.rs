@@ -260,28 +260,36 @@ impl VCModelPlugin for RvcPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::cleanup_test_dirs;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn update_and_get_info() {
         let mut r = Rvc::new(48000, "m.pth".into());
         assert_eq!(r.processing_sample_rate(), 48000);
         r.update_settings("tran", Value::from(7));
         let info = r.get_info();
         assert_eq!(info["tran"], 7);
+        cleanup_test_dirs();
     }
 
     #[test]
+    #[serial]
     fn export_to_onnx_writes_file() {
         let r = Rvc::new(48000, String::new());
         let path = r.export_to_onnx().unwrap();
         assert!(std::path::Path::new(&path).exists());
+        cleanup_test_dirs();
     }
 
     #[test]
+    #[serial]
     fn get_model_current_contains_keys() {
         let r = Rvc::new(48000, String::new());
         let cur = r.get_model_current();
         assert_eq!(cur.len(), 3);
         assert_eq!(cur[0]["key"], "defaultTune");
+        cleanup_test_dirs();
     }
 }

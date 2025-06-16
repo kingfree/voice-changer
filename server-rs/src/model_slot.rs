@@ -32,7 +32,7 @@ impl Default for RVCModelSlot {
 
 pub struct ModelSlotManager {
     model_dir: String,
-    slots: RwLock<Vec<ModelSlot>>, 
+    slots: RwLock<Vec<ModelSlot>>,
 }
 
 impl ModelSlotManager {
@@ -168,19 +168,19 @@ impl ModelSlotManager {
 
     /// Retrieve a single slot by index.
     pub fn get_slot_info(&self, slot: usize) -> Option<ModelSlot> {
-        self.slots
-            .read()
-            .ok()
-            .and_then(|v| v.get(slot).cloned())
+        self.slots.read().ok().and_then(|v| v.get(slot).cloned())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::cleanup_test_dirs;
+    use serial_test::serial;
     use tempfile::tempdir;
 
     #[test]
+    #[serial]
     fn save_and_load() {
         let dir = tempdir().unwrap();
         let manager = ModelSlotManager::new(dir.path().to_str().unwrap().to_string());
@@ -197,9 +197,11 @@ mod tests {
             }
             _ => panic!("invalid slot"),
         }
+        cleanup_test_dirs();
     }
 
     #[test]
+    #[serial]
     fn update_model_info_modifies_file() {
         let dir = tempdir().unwrap();
         let manager = ModelSlotManager::new(dir.path().to_str().unwrap().to_string());
@@ -217,9 +219,11 @@ mod tests {
             }
             _ => panic!("invalid"),
         }
+        cleanup_test_dirs();
     }
 
     #[test]
+    #[serial]
     fn store_model_assets_moves_file() {
         let dir = tempdir().unwrap();
         let upload_dir = Path::new(UPLOAD_DIR);
@@ -243,5 +247,6 @@ mod tests {
         assert_eq!(all.len(), MAX_SLOT_NUM);
 
         assert!(matches!(manager.get_slot_info(0), Some(ModelSlot::RVC(_))));
+        cleanup_test_dirs();
     }
 }

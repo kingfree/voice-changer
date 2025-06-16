@@ -308,6 +308,8 @@ fn generate_strength(size: usize, offset_rate: f32, end_rate: f32) -> (Vec<f32>,
 mod tests {
     use super::*;
     use crate::rvc::VoiceChangerModel;
+    use crate::test_util::cleanup_test_dirs;
+    use serial_test::serial;
 
     struct DummyModel;
 
@@ -349,6 +351,7 @@ mod tests {
     impl VCModel for DummyModel {}
 
     #[test]
+    #[serial]
     fn sample_rate_methods() {
         let vc = VoiceChanger::new();
         vc.set_input_sample_rate(24000);
@@ -356,9 +359,11 @@ mod tests {
         let info = vc.get_info();
         assert_eq!(info.input_sample_rate, 24000);
         assert_eq!(info.output_sample_rate, 24000);
+        cleanup_test_dirs();
     }
 
     #[test]
+    #[serial]
     fn model_inference_and_processing_rate() {
         let vc = VoiceChanger::new();
         vc.set_model(DummyModel);
@@ -366,5 +371,6 @@ mod tests {
         assert_eq!(rate, 16000);
         let out = vc.change_voice(&[1, 2, 3]);
         assert_eq!(out, vec![1, 2, 3]);
+        cleanup_test_dirs();
     }
 }
