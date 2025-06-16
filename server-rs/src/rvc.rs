@@ -17,6 +17,12 @@ pub trait VoiceChangerModel: Send + Sync {
         crossfade_size: usize,
         sola_search_frame: usize,
     ) -> (Vec<i16>, Vec<i16>, Vec<i16>, usize, f32, usize);
+
+    /// Export the model to ONNX and return the file path.
+    fn export_to_onnx(&self) -> std::io::Result<String>;
+
+    /// Retrieve the current model settings as key/value pairs.
+    fn get_model_current(&self) -> Vec<Value>;
 }
 
 /// Marker trait used throughout the Rust server implementation.  It extends
@@ -237,6 +243,14 @@ impl VoiceChangerModel for Rvc {
             vol,
             input_size + crossfade_size,
         )
+    }
+
+    fn export_to_onnx(&self) -> std::io::Result<String> {
+        Rvc::export_to_onnx(self)
+    }
+
+    fn get_model_current(&self) -> Vec<Value> {
+        Rvc::get_model_current(self)
     }
 }
 

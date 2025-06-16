@@ -301,8 +301,10 @@ impl VoiceChangerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn load_model_moves_files() {
         let dir_path = Path::new("m");
         let upload_dir = Path::new("upload_dir");
@@ -355,6 +357,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn export_to_onnx_creates_file() {
         let params = VoiceChangerParams {
             model_dir: "m".into(),
@@ -383,6 +386,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn merge_models_creates_output() {
         use serde_json::json;
         let params = VoiceChangerParams {
@@ -426,6 +430,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn update_model_methods_modify_performance() {
         let params = VoiceChangerParams {
             model_dir: "m".into(),
