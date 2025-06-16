@@ -1,8 +1,12 @@
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::RwLock;
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+
+use crate::voice_changer::VoiceChanger;
+use crate::constants::STORED_SETTING_FILE;
 
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -10,13 +14,6 @@ use crate::voice_changer_params::VoiceChangerParams;
 pub struct VoiceChangerManagerSettings {
     pub model_slot_index: i32,
     pub pass_through: bool,
-    pub input_sample_rate: i32,
-    pub output_sample_rate: i32,
-    pub cross_fade_offset_rate: f32,
-    pub cross_fade_end_rate: f32,
-    pub cross_fade_overlap_size: i32,
-    pub record_io: i32,
-    pub performance: Vec<f32>,
 }
 
 impl Default for VoiceChangerManagerSettings {
@@ -24,13 +21,17 @@ impl Default for VoiceChangerManagerSettings {
         Self {
             model_slot_index: -1,
             pass_through: false,
-            input_sample_rate: 48000,
-            output_sample_rate: 48000,
-            cross_fade_offset_rate: 0.1,
-            cross_fade_end_rate: 0.9,
-            cross_fade_overlap_size: 4096,
-            record_io: 0,
-            performance: vec![0.0, 0.0, 0.0, 0.0],
+        }
+    }
+}
+
+impl VoiceChangerManagerSettings {
+    fn update_from_map(&mut self, map: &HashMap<String, Value>) {
+        if let Some(v) = map.get("modelSlotIndex").and_then(|v| v.as_i64()) {
+            self.model_slot_index = v as i32;
+        }
+        if let Some(v) = map.get("passThrough").and_then(|v| v.as_bool()) {
+            self.pass_through = v;
         }
     }
 }
@@ -57,19 +58,25 @@ pub struct VoiceChangerManager {
     settings: RwLock<VoiceChangerManagerSettings>,
     model_path: RwLock<Option<String>>,
     emit_callback: RwLock<Option<Box<dyn Fn(Vec<f32>) + Send + Sync>>>,
-    prev_audio: RwLock<Vec<i16>>,
+    voice_changer: VoiceChanger,
+    stored_setting: RwLock<HashMap<String, Value>>,
 }
 
 static INSTANCE: OnceCell<VoiceChangerManager> = OnceCell::new();
 
 impl VoiceChangerManager {
     pub fn get_instance(params: VoiceChangerParams) -> &'static VoiceChangerManager {
-        INSTANCE.get_or_init(|| Self {
-            params,
-            settings: RwLock::new(VoiceChangerManagerSettings::default()),
-            model_path: RwLock::new(None),
-            emit_callback: RwLock::new(None),
-            prev_audio: RwLock::new(Vec::new()),
+        INSTANCE.get_or_init(|| {
+            let mut m = Self {
+                params,
+                settings: RwLock::new(VoiceChangerManagerSettings::default()),
+                model_path: RwLock::new(None),
+                emit_callback: RwLock::new(None),
+                voice_changer: VoiceChanger::new(),
+                stored_setting: RwLock::new(HashMap::new()),
+            };
+            m.load_stored_settings();
+            m
         })
     }
 
@@ -103,43 +110,10 @@ impl VoiceChangerManager {
     }
 
     pub fn change_voice(&self, input: &[i16]) -> Vec<i16> {
-        {
-            let settings = self.settings.read().unwrap();
-            if settings.pass_through {
-                return input.to_vec();
-            }
+        if self.settings.read().unwrap().pass_through {
+            return input.to_vec();
         }
-
-        let (overlap, offset_rate, end_rate) = {
-            let s = self.settings.read().unwrap();
-            (
-                s.cross_fade_overlap_size as usize,
-                s.cross_fade_offset_rate,
-                s.cross_fade_end_rate,
-            )
-        };
-
-        let mut out = input.to_vec();
-        let mut prev = self.prev_audio.write().unwrap();
-        let n = if prev.len() == input.len() {
-            overlap.min(input.len())
-        } else {
-            0
-        };
-        if n > 0 {
-            let (prev_strength, cur_strength) = generate_strength(n, offset_rate, end_rate);
-            for i in 0..n {
-                let p = prev[i] as f32 * prev_strength[i];
-                let c = input[i] as f32 * cur_strength[i];
-                out[i] = (p + c) as i16;
-            }
-        }
-
-        prev.clear();
-        let keep = overlap.min(out.len());
-        prev.extend_from_slice(&out[out.len() - keep..]);
-
-        out
+        self.voice_changer.change_voice(input)
     }
 
     pub fn update_settings(&self, key: &str, val: serde_json::Value) -> serde_json::Value {
@@ -156,47 +130,21 @@ impl VoiceChangerManager {
                         settings.pass_through = v;
                     }
                 }
-                "inputSampleRate" => {
-                    if let Some(v) = val.as_i64() {
-                        settings.input_sample_rate = v as i32;
-                    }
-                }
-                "outputSampleRate" => {
-                    if let Some(v) = val.as_i64() {
-                        settings.output_sample_rate = v as i32;
-                    }
-                }
-                "crossFadeOffsetRate" => {
-                    if let Some(v) = val.as_f64() {
-                        settings.cross_fade_offset_rate = v as f32;
-                    }
-                }
-                "crossFadeEndRate" => {
-                    if let Some(v) = val.as_f64() {
-                        settings.cross_fade_end_rate = v as f32;
-                    }
-                }
-                "crossFadeOverlapSize" => {
-                    if let Some(v) = val.as_i64() {
-                        settings.cross_fade_overlap_size = v as i32;
-                    }
-                }
-                "recordIO" => {
-                    if let Some(v) = val.as_i64() {
-                        settings.record_io = v as i32;
-                    }
-                }
                 _ => {}
             }
         }
+        self.voice_changer.update_settings(key, val.clone());
+        self.store_setting(key, &val);
         self.get_info()
     }
 
     pub fn get_info(&self) -> serde_json::Value {
         let settings = self.settings.read().unwrap();
+        let vc_info = self.voice_changer.get_info();
         json!({
             "status": "OK",
             "settings": &*settings,
+            "voiceChanger": vc_info,
             "modelPath": self.model_path.read().unwrap().clone(),
         })
     }
@@ -211,8 +159,8 @@ impl VoiceChangerManager {
     }
 
     pub fn get_performance(&self) -> serde_json::Value {
-        let settings = self.settings.read().unwrap();
-        json!({ "status": "OK", "performance": settings.performance })
+        let perf = self.voice_changer.get_info().performance;
+        json!({ "status": "OK", "performance": perf })
     }
 
     pub fn update_model_default(&self) -> serde_json::Value {
@@ -243,35 +191,31 @@ impl VoiceChangerManager {
         }
     }
 
+    fn store_setting(&self, key: &str, val: &Value) {
+        let mut map = self.stored_setting.write().unwrap();
+        map.insert(key.to_string(), val.clone());
+        if let Ok(text) = serde_json::to_string(&*map) {
+            let _ = std::fs::write(STORED_SETTING_FILE, text);
+        }
+    }
+
+    fn load_stored_settings(&mut self) {
+        if let Ok(text) = std::fs::read_to_string(STORED_SETTING_FILE) {
+            if let Ok(map) = serde_json::from_str::<HashMap<String, Value>>(&text) {
+                for (k, v) in &map {
+                    self.update_settings(k, v.clone());
+                }
+                *self.stored_setting.write().unwrap() = map;
+            }
+        }
+    }
+
     #[cfg(test)]
     pub fn reset(&self) {
         *self.settings.write().unwrap() = VoiceChangerManagerSettings::default();
-        self.prev_audio.write().unwrap().clear();
+        self.voice_changer.reset();
+        self.stored_setting.write().unwrap().clear();
     }
-}
-
-fn generate_strength(size: usize, offset_rate: f32, end_rate: f32) -> (Vec<f32>, Vec<f32>) {
-    if size == 0 {
-        return (Vec::new(), Vec::new());
-    }
-    let offset = (size as f32 * offset_rate).round() as usize;
-    let end = (size as f32 * end_rate).round() as usize;
-    let mut prev = vec![0.0_f32; size];
-    let mut cur = vec![0.0_f32; size];
-    for i in 0..size {
-        if i < offset {
-            prev[i] = 1.0;
-            cur[i] = 0.0;
-        } else if i < end && end > offset {
-            let percent = (i - offset) as f32 / (end - offset) as f32;
-            prev[i] = (percent * 0.5 * std::f32::consts::PI).cos().powi(2);
-            cur[i] = ((1.0 - percent) * 0.5 * std::f32::consts::PI).cos().powi(2);
-        } else {
-            prev[i] = 0.0;
-            cur[i] = 1.0;
-        }
-    }
-    (prev, cur)
 }
 
 #[cfg(test)]
