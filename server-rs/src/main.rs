@@ -15,6 +15,7 @@ mod voice_changer_params_manager;
 use voice_changer_params_manager::VoiceChangerParamsManager;
 mod voice_changer_manager;
 use voice_changer_manager::VoiceChangerManager;
+mod volume_extractor;
 mod mmvc_rest;
 mod mmvc_socketio_app;
 mod mmvc_socketio_server;
