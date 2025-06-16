@@ -1,13 +1,16 @@
-use axum::{routing::{get, post}, Router, Json};
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 #[path = "mmvc_rest_fileuploader.rs"]
 mod mmvc_rest_fileuploader;
+use crate::voice_changer_manager::VoiceChangerManager;
+use base64::{engine::general_purpose, Engine as _};
 use mmvc_rest_fileuploader::MMVCRestFileuploader;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use once_cell::sync::OnceCell;
 use tokio::sync::Mutex;
-use base64::{engine::general_purpose, Engine as _};
-use crate::voice_changer_manager::VoiceChangerManager;
 
 static MANAGER: OnceCell<&'static VoiceChangerManager> = OnceCell::new();
 static LOCK: OnceCell<Arc<Mutex<()>>> = OnceCell::new();
@@ -52,7 +55,10 @@ async fn test(Json(payload): Json<VoiceModel>) -> Json<TestResponse> {
         out_bytes.extend_from_slice(&s.to_le_bytes());
     }
     let encoded = general_purpose::STANDARD.encode(out_bytes);
-    Json(TestResponse { timestamp: payload.timestamp, changed_voice_base64: encoded })
+    Json(TestResponse {
+        timestamp: payload.timestamp,
+        changed_voice_base64: encoded,
+    })
 }
 
 pub struct MMVCRest {
@@ -79,9 +85,13 @@ impl MMVCRest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}, Router};
-    use tower::ServiceExt; // for `oneshot`
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        Router,
+    };
     use serde_json::{json, Value};
+    use tower::ServiceExt; // for `oneshot`
 
     use crate::voice_changer_params::VoiceChangerParams;
     fn app() -> Router {
@@ -102,6 +112,8 @@ mod tests {
             whisper_tiny: "".into(),
         };
         let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
         MMVCRest::new(manager).router()
     }
 

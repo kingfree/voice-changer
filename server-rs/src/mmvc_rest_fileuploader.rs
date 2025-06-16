@@ -1,9 +1,13 @@
-use axum::{routing::{get, post}, Router, Json, extract::{Multipart, Form}};
-use serde::{Serialize, Deserialize};
-use serde_json::{json, Value};
-use tokio::{fs, io::AsyncWriteExt};
+use axum::{
+    extract::{Form, Multipart},
+    routing::{get, post},
+    Json, Router,
+};
 use once_cell::sync::OnceCell;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use tokio::{fs, io::AsyncWriteExt};
 
 use crate::voice_changer_manager::VoiceChangerManager;
 
@@ -74,7 +78,12 @@ async fn post_concat_uploaded_file(Form(params): Form<ConcatParams>) -> Json<Val
         }
     }
     if fs::remove_file(&target).await.is_ok() {}
-    let mut out = match fs::OpenOptions::new().create(true).append(true).open(&target).await {
+    let mut out = match fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&target)
+        .await
+    {
         Ok(f) => f,
         Err(_) => return Json(json!({"status":"ERROR","msg":"open"})),
     };
@@ -116,17 +125,19 @@ async fn post_update_settings(Form(params): Form<UpdateParams>) -> Json<Value> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LoadModelParams {
+struct LoadModelPayload {
     slot: i32,
     is_half: bool,
     params: String,
 }
 
-async fn post_load_model(Form(_params): Form<LoadModelParams>) -> Json<Value> {
+async fn post_load_model(Form(payload): Form<LoadModelPayload>) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
-    // placeholder implementation
-    manager.load_model("dummy".to_string());
-    Json(manager.get_info())
+    if let Ok(req) = serde_json::from_str::<crate::voice_changer_manager::LoadModelRequest>(&payload.params) {
+        Json(manager.load_model(req))
+    } else {
+        Json(json!({"status": "ERROR", "msg": "invalid params"}))
+    }
 }
 
 #[derive(Deserialize)]
@@ -192,18 +203,24 @@ impl MMVCRestFileuploader {
         Self { router }
     }
 
-    pub fn router(self) -> Router { self.router }
+    pub fn router(self) -> Router {
+        self.router
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}, Router};
-    use tower::ServiceExt;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        Router,
+    };
     use serde_json::Value;
+    use tower::ServiceExt;
 
-    use crate::voice_changer_params::VoiceChangerParams;
-    use crate::mmvc_rest::MMVCRest; // for constructing manager
+    use crate::mmvc_rest::MMVCRest;
+    use crate::voice_changer_params::VoiceChangerParams; // for constructing manager
 
     fn app() -> Router {
         let params = VoiceChangerParams {
@@ -223,6 +240,8 @@ mod tests {
             whisper_tiny: "".into(),
         };
         let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
         MMVCRestFileuploader::new(manager).router()
     }
 
@@ -267,4 +286,3 @@ mod tests {
         assert_eq!(v["settings"]["model_slot_index"], 1);
     }
 }
-
