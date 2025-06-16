@@ -13,5 +13,6 @@ cargo run
 The server exposes:
 - `GET /version` returning `0.1`.
 - WebSocket endpoint `/ws/audio` for streaming audio data.
+- `GET /openapi.json` serving the OpenAPI specification.
 
 Incoming binary data on the WebSocket is logged to the console.
