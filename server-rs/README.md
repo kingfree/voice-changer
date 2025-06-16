@@ -31,7 +31,12 @@ containing `timestamp` and `buffer` fields and echoes them back.
 
 In addition a WebSocket echo service is available at `/ws`.
 
+Static frontend files from `client/demo/dist` are served at `/`, `/front`,
+`/trainer`, and `/recorder` along with auxiliary directories used by the
+Python implementation.
+
 The server initializes a `VoiceChangerManager` which will manage model
-loading and settings updates. Currently it only provides placeholder
-functionality but mirrors the structure of the Python implementation.
+loading and settings updates. During startup required weight files and
+initial sample models are downloaded automatically if they are missing,
+mirroring the behaviour of the Python implementation.
 

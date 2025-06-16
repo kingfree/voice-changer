@@ -39,6 +39,10 @@ impl VoiceChangerManager {
         })
     }
 
+    pub fn model_dir(&self) -> &str {
+        &self.params.model_dir
+    }
+
     pub fn load_model(&self, path: String) {
         let mut guard = self.model_path.write().unwrap();
         *guard = Some(path);
