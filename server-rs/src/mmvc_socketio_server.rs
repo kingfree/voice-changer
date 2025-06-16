@@ -32,6 +32,7 @@ async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
 
 async fn handle_socket(socket: WebSocket) {
     let manager = MANAGER.get().expect("manager not set");
+    manager.clear_prev_audio();
     let (mut sender, mut receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let tx_clone = tx.clone();
