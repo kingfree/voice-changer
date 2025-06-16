@@ -275,4 +275,106 @@ mod tests {
         let dst = dir_path.join("0").join("model.pth");
         assert!(dst.exists());
     }
+
+    #[test]
+    fn export_to_onnx_creates_file() {
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        let ok = manager.export_to_onnx();
+        assert!(ok);
+        let path = std::path::Path::new(crate::constants::TMP_DIR).join("model.onnx");
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn merge_models_creates_output() {
+        use serde_json::json;
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        std::fs::create_dir_all(crate::constants::TMP_DIR).unwrap();
+        let f1 = std::path::Path::new(crate::constants::TMP_DIR).join("a.txt");
+        let f2 = std::path::Path::new(crate::constants::TMP_DIR).join("b.txt");
+        std::fs::write(&f1, b"a").unwrap();
+        std::fs::write(&f2, b"b").unwrap();
+
+        let req = json!({
+            "output": "merged.txt",
+            "files": [f1.to_str().unwrap(), f2.to_str().unwrap()]
+        })
+        .to_string();
+
+        manager.merge_models(&req);
+
+        let out = std::path::Path::new(crate::constants::TMP_DIR).join("merged.txt");
+        assert!(out.exists());
+        let content = std::fs::read_to_string(out).unwrap();
+        assert_eq!(content, "ab");
+    }
+
+    #[test]
+    fn update_model_methods_modify_performance() {
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        manager.update_model_default();
+        manager.update_model_info("{}");
+        manager.upload_model_assets("{}");
+        let perf = manager.get_performance();
+        assert_eq!(perf["performance"][0], 1.0);
+        assert_eq!(perf["performance"][1], 1.0);
+        assert_eq!(perf["performance"][2], 1.0);
+    }
 }
