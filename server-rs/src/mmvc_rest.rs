@@ -1,3 +1,10 @@
+//! REST API exposing a minimal set of voice changer endpoints.
+//!
+//! This module implements a subset of the Python server REST API.  The
+//! endpoints are primarily used for unit testing and as a simple example for
+//! clients.  Each handler is documented so `cargo doc` can generate API
+//! documentation for the HTTP routes.
+
 use axum::{
     routing::{get, post},
     Json, Router,
@@ -15,27 +22,41 @@ use tokio::sync::Mutex;
 static MANAGER: OnceCell<&'static VoiceChangerManager> = OnceCell::new();
 static LOCK: OnceCell<Arc<Mutex<()>>> = OnceCell::new();
 
+/// Response for [`hello`] endpoint.
 #[derive(Serialize)]
 struct Hello {
+    /// Static greeting string returned to the client.
     result: &'static str,
 }
 
+/// `GET /api/hello`
+///
+/// Return a simple greeting verifying that the server is running.
 async fn hello() -> Json<Hello> {
     Json(Hello { result: "Index" })
 }
 
+/// Request payload for [`test()`] endpoint.
 #[derive(Deserialize)]
 struct VoiceModel {
+    /// Arbitrary timestamp used by the caller.
     timestamp: u64,
+    /// Little endian 16‑bit PCM samples encoded as base64.
     buffer: String,
 }
 
+/// Response payload for [`test()`].
 #[derive(Serialize)]
 struct TestResponse {
+    /// Echoed timestamp from the request.
     timestamp: u64,
+    /// Converted voice samples encoded as base64.
     changed_voice_base64: String,
 }
 
+/// `POST /test`
+///
+/// Accepts base64 encoded audio samples and returns the modified voice.
 async fn test(Json(payload): Json<VoiceModel>) -> Json<TestResponse> {
     let manager = MANAGER.get().expect("manager not set");
     let lock = LOCK.get().expect("lock not set");
@@ -61,11 +82,16 @@ async fn test(Json(payload): Json<VoiceModel>) -> Json<TestResponse> {
     })
 }
 
+/// REST API application.
+///
+/// Use [`MMVCRest::new`] to create a router that exposes the HTTP endpoints
+/// defined in this module.
 pub struct MMVCRest {
     router: Router,
 }
 
 impl MMVCRest {
+    /// Construct a new [`MMVCRest`] using the provided manager instance.
     pub fn new(manager: &'static VoiceChangerManager) -> Self {
         MANAGER.set(manager).ok();
         LOCK.set(Arc::new(Mutex::new(()))).ok();
@@ -77,6 +103,7 @@ impl MMVCRest {
         Self { router }
     }
 
+    /// Consume the object and return the underlying [`Router`].
     pub fn router(self) -> Router {
         self.router
     }
