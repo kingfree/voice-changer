@@ -146,3 +146,6 @@ This software is not signed by the developer. A warning will appear as shown bel
 ## Disclaimer
 
 We are not responsible for any direct, indirect, consequential, or special damages arising from the use or inability to use this software.
+
+## Rust/Vue Prototype
+A minimal prototype using Rust for the backend and Vue for the frontend is available in the `rust_vue` directory.

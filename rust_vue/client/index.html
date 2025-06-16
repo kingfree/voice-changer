@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Voice Changer Demo</title>
+  <script src="https://unpkg.com/vue@3"></script>
+</head>
+<body>
+<div id="app">
+  <button @click="connect" :disabled="connected">Connect</button>
+  <button @click="start" :disabled="!connected || recording">Start</button>
+  <button @click="stop" :disabled="!recording">Stop</button>
+  <p>Status: {{ status }}</p>
+</div>
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      ws: null,
+      connected: false,
+      recording: false,
+      recorder: null,
+      status: 'disconnected'
+    };
+  },
+  methods: {
+    connect() {
+      this.ws = new WebSocket('ws://localhost:8080/ws/audio');
+      this.ws.binaryType = 'arraybuffer';
+      this.ws.onopen = () => {
+        this.connected = true;
+        this.status = 'connected';
+      };
+      this.ws.onclose = () => {
+        this.connected = false;
+        this.status = 'disconnected';
+      };
+    },
+    async start() {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.recorder = new MediaRecorder(stream);
+      this.recorder.ondataavailable = (e) => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(e.data);
+        }
+      };
+      this.recorder.start(200);
+      this.recording = true;
+      this.status = 'recording';
+    },
+    stop() {
+      if (this.recorder) {
+        this.recorder.stop();
+      }
+      this.recording = false;
+      this.status = 'connected';
+    }
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
