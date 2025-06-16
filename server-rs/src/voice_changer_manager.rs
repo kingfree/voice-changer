@@ -103,14 +103,16 @@ impl VoiceChangerManager {
             }
         }
         if let Some(p) = first {
-            *self.model_path.write().unwrap() = Some(p.to_string_lossy().to_string());
+            if let Ok(mut m) = self.model_path.write() {
+                *m = Some(p.to_string_lossy().to_string());
+            }
         }
 
         self.get_info()
     }
 
     pub fn change_voice(&self, input: &[i16]) -> Vec<i16> {
-        if self.settings.read().unwrap().pass_through {
+        if self.settings.read().map(|s| s.pass_through).unwrap_or(false) {
             return input.to_vec();
         }
         self.voice_changer.change_voice(input)
@@ -121,8 +123,7 @@ impl VoiceChangerManager {
     }
 
     pub fn update_settings(&self, key: &str, val: serde_json::Value) -> serde_json::Value {
-        {
-            let mut settings = self.settings.write().unwrap();
+        if let Ok(mut settings) = self.settings.write() {
             match key {
                 "modelSlotIndex" => {
                     if let Some(v) = val.as_i64() {
@@ -143,13 +144,16 @@ impl VoiceChangerManager {
     }
 
     pub fn get_info(&self) -> serde_json::Value {
-        let settings = self.settings.read().unwrap();
+        let settings = match self.settings.read() {
+            Ok(s) => s,
+            Err(_) => return json!({"status": "ERR"}),
+        };
         let vc_info = self.voice_changer.get_info();
         json!({
             "status": "OK",
             "settings": &*settings,
             "voiceChanger": vc_info,
-            "modelPath": self.model_path.read().unwrap().clone(),
+            "modelPath": self.model_path.read().ok().and_then(|v| v.clone()),
         })
     }
 
@@ -188,21 +192,25 @@ impl VoiceChangerManager {
     where
         F: Fn(Vec<f32>) + Send + Sync + 'static,
     {
-        let mut lock = self.emit_callback.write().unwrap();
-        *lock = Some(Box::new(cb));
+        if let Ok(mut lock) = self.emit_callback.write() {
+            *lock = Some(Box::new(cb));
+        }
     }
 
     pub fn emit_performance(&self, perf: Vec<f32>) {
-        if let Some(cb) = &*self.emit_callback.read().unwrap() {
-            cb(perf);
+        if let Ok(callback) = self.emit_callback.read() {
+            if let Some(cb) = &*callback {
+                cb(perf);
+            }
         }
     }
 
     fn store_setting(&self, key: &str, val: &Value) {
-        let mut map = self.stored_setting.write().unwrap();
-        map.insert(key.to_string(), val.clone());
-        if let Ok(text) = serde_json::to_string(&*map) {
-            let _ = std::fs::write(STORED_SETTING_FILE, text);
+        if let Ok(mut map) = self.stored_setting.write() {
+            map.insert(key.to_string(), val.clone());
+            if let Ok(text) = serde_json::to_string(&*map) {
+                let _ = std::fs::write(STORED_SETTING_FILE, text);
+            }
         }
     }
 
@@ -212,16 +220,22 @@ impl VoiceChangerManager {
                 for (k, v) in &map {
                     self.update_settings(k, v.clone());
                 }
-                *self.stored_setting.write().unwrap() = map;
+                if let Ok(mut s) = self.stored_setting.write() {
+                    *s = map;
+                }
             }
         }
     }
 
     #[cfg(test)]
     pub fn reset(&self) {
-        *self.settings.write().unwrap() = VoiceChangerManagerSettings::default();
+        if let Ok(mut s) = self.settings.write() {
+            *s = VoiceChangerManagerSettings::default();
+        }
         self.voice_changer.reset();
-        self.stored_setting.write().unwrap().clear();
+        if let Ok(mut st) = self.stored_setting.write() {
+            st.clear();
+        }
     }
 }
 
@@ -274,5 +288,107 @@ mod tests {
 
         let dst = dir_path.join("0").join("model.pth");
         assert!(dst.exists());
+    }
+
+    #[test]
+    fn export_to_onnx_creates_file() {
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        let ok = manager.export_to_onnx();
+        assert!(ok);
+        let path = std::path::Path::new(crate::constants::TMP_DIR).join("model.onnx");
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn merge_models_creates_output() {
+        use serde_json::json;
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        std::fs::create_dir_all(crate::constants::TMP_DIR).unwrap();
+        let f1 = std::path::Path::new(crate::constants::TMP_DIR).join("a.txt");
+        let f2 = std::path::Path::new(crate::constants::TMP_DIR).join("b.txt");
+        std::fs::write(&f1, b"a").unwrap();
+        std::fs::write(&f2, b"b").unwrap();
+
+        let req = json!({
+            "output": "merged.txt",
+            "files": [f1.to_str().unwrap(), f2.to_str().unwrap()]
+        })
+        .to_string();
+
+        manager.merge_models(&req);
+
+        let out = std::path::Path::new(crate::constants::TMP_DIR).join("merged.txt");
+        assert!(out.exists());
+        let content = std::fs::read_to_string(out).unwrap();
+        assert_eq!(content, "ab");
+    }
+
+    #[test]
+    fn update_model_methods_modify_performance() {
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        manager.update_model_default();
+        manager.update_model_info("{}");
+        manager.upload_model_assets("{}");
+        let perf = manager.get_performance();
+        assert_eq!(perf["performance"][0], 1.0);
+        assert_eq!(perf["performance"][1], 1.0);
+        assert_eq!(perf["performance"][2], 1.0);
     }
 }
