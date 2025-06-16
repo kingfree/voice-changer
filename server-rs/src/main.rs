@@ -7,11 +7,10 @@ use tracing_subscriber::EnvFilter;
 
 mod voice_changer_params;
 use voice_changer_params::VoiceChangerParams;
-mod voice_changer;
-mod rvc;
-mod plugin;
 mod model_slot;
-mod model_slot_manager;
+mod plugin;
+mod rvc;
+mod voice_changer;
 mod voice_changer_params_manager;
 use voice_changer_params_manager::VoiceChangerParamsManager;
 mod voice_changer_manager;
@@ -108,7 +107,6 @@ struct Args {
     #[arg(long, default_value = "pretrain/rmvpe.onnx")]
     rmvpe_onnx: String,
 }
-
 
 async fn local_server(args: Args) {
     let vc_params = VoiceChangerParams {

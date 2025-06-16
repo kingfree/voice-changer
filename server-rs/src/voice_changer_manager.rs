@@ -6,11 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::constants::STORED_SETTING_FILE;
-use crate::voice_changer::VoiceChanger;
+use crate::model_slot::{ModelSlot, ModelSlotManager, RVCModelSlot};
 use crate::plugin::VCModelPlugin;
 use crate::rvc::RvcPlugin;
-use crate::model_slot::{ModelSlot, RVCModelSlot};
-use crate::model_slot_manager::ModelSlotManager;
+use crate::voice_changer::VoiceChanger;
 
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -123,7 +122,9 @@ impl VoiceChangerManager {
                 model_file: path.clone(),
                 sampling_rate: 48000,
             });
-            let _ = self.model_slot_manager.save_model_slot(params.slot as usize, &slot);
+            let _ = self
+                .model_slot_manager
+                .save_model_slot(params.slot as usize, &slot);
             if let Ok(mut cur) = self.current_slot.write() {
                 *cur = Some(slot.clone());
             }
@@ -142,7 +143,12 @@ impl VoiceChangerManager {
     }
 
     pub fn change_voice(&self, input: &[i16]) -> Vec<i16> {
-        if self.settings.read().map(|s| s.pass_through).unwrap_or(false) {
+        if self
+            .settings
+            .read()
+            .map(|s| s.pass_through)
+            .unwrap_or(false)
+        {
             return input.to_vec();
         }
         self.voice_changer.change_voice(input)
@@ -205,7 +211,9 @@ impl VoiceChangerManager {
         self.voice_changer.update_model_default();
         if let Ok(s) = self.settings.read() {
             if s.model_slot_index >= 0 {
-                let data = serde_json::json!({"slot": s.model_slot_index, "key": "updated", "val": true}).to_string();
+                let data =
+                    serde_json::json!({"slot": s.model_slot_index, "key": "updated", "val": true})
+                        .to_string();
                 let _ = self.model_slot_manager.update_model_info(&data);
             }
         }
