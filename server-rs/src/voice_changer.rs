@@ -174,8 +174,12 @@ impl VoiceChanger {
     }
 
     pub fn set_model<M: VCModel + 'static>(&self, model: M) {
+        self.set_model_box(Box::new(model));
+    }
+
+    pub fn set_model_box(&self, model: Box<dyn VCModel>) {
         if let Ok(mut m) = self.model.write() {
-            *m = Some(Box::new(model));
+            *m = Some(model);
         }
     }
 

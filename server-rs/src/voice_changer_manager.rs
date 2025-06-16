@@ -3,10 +3,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::constants::STORED_SETTING_FILE;
 use crate::voice_changer::VoiceChanger;
+use crate::plugin::VCModelPlugin;
+use crate::rvc::RvcPlugin;
 
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -60,6 +62,7 @@ pub struct VoiceChangerManager {
     emit_callback: RwLock<Option<Box<dyn Fn(Vec<f32>) + Send + Sync>>>,
     voice_changer: VoiceChanger,
     stored_setting: RwLock<HashMap<String, Value>>,
+    plugins: RwLock<HashMap<String, Arc<dyn VCModelPlugin>>>,
 }
 
 static INSTANCE: OnceCell<VoiceChangerManager> = OnceCell::new();
@@ -74,7 +77,9 @@ impl VoiceChangerManager {
                 emit_callback: RwLock::new(None),
                 voice_changer: VoiceChanger::new(),
                 stored_setting: RwLock::new(HashMap::new()),
+                plugins: RwLock::new(HashMap::new()),
             };
+            m.register_plugin(RvcPlugin);
             m.load_stored_settings();
             m
         })
@@ -103,8 +108,18 @@ impl VoiceChangerManager {
             }
         }
         if let Some(p) = first {
+            let path = p.to_string_lossy().to_string();
             if let Ok(mut m) = self.model_path.write() {
-                *m = Some(p.to_string_lossy().to_string());
+                *m = Some(path.clone());
+            }
+            if let Some(plugin) = self
+                .plugins
+                .read()
+                .ok()
+                .and_then(|map| map.get(&params.voice_changer_type).cloned())
+            {
+                let model = plugin.create_model(&self.params, &path);
+                self.voice_changer.set_model_box(model);
             }
         }
 
@@ -188,6 +203,16 @@ impl VoiceChangerManager {
 }
 
 impl VoiceChangerManager {
+    pub fn register_plugin<P: VCModelPlugin + 'static>(&mut self, plugin: P) {
+        if let Ok(mut map) = self.plugins.write() {
+            map.insert(plugin.name().to_string(), Arc::new(plugin));
+        }
+    }
+
+    pub fn get_processing_sampling_rate(&self) -> i32 {
+        self.voice_changer.get_processing_sampling_rate()
+    }
+
     pub fn set_emit_to<F>(&self, cb: F)
     where
         F: Fn(Vec<f32>) + Send + Sync + 'static,
@@ -288,6 +313,10 @@ mod tests {
 
         let dst = dir_path.join("0").join("model.pth");
         assert!(dst.exists());
+
+        // plugin should set processing sample rate via RVC plugin
+        let rate = manager.get_processing_sampling_rate();
+        assert_eq!(rate, 48000);
     }
 
     #[test]

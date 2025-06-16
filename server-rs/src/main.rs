@@ -9,6 +9,7 @@ mod voice_changer_params;
 use voice_changer_params::VoiceChangerParams;
 mod voice_changer;
 mod rvc;
+mod plugin;
 mod voice_changer_params_manager;
 use voice_changer_params_manager::VoiceChangerParamsManager;
 mod voice_changer_manager;

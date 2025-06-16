@@ -3,13 +3,18 @@ pub trait VCModel: Send + Sync {
     fn inference(&self, input: &[i16]) -> Vec<i16>;
 }
 
+use crate::plugin::VCModelPlugin;
+use crate::voice_changer_params::VoiceChangerParams;
+
 pub struct Rvc {
     sample_rate: i32,
+    #[allow(dead_code)]
+    path: String,
 }
 
 impl Rvc {
-    pub fn new(sample_rate: i32) -> Self {
-        Self { sample_rate }
+    pub fn new(sample_rate: i32, path: String) -> Self {
+        Self { sample_rate, path }
     }
 }
 
@@ -20,5 +25,17 @@ impl VCModel for Rvc {
 
     fn inference(&self, input: &[i16]) -> Vec<i16> {
         input.to_vec()
+    }
+}
+
+pub struct RvcPlugin;
+
+impl VCModelPlugin for RvcPlugin {
+    fn name(&self) -> &str {
+        "RVC"
+    }
+
+    fn create_model(&self, _params: &VoiceChangerParams, path: &str) -> Box<dyn VCModel> {
+        Box::new(Rvc::new(48000, path.to_string()))
     }
 }
