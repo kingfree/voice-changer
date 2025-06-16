@@ -16,6 +16,9 @@ mod mmvc_socketio_app;
 mod mmvc_socketio_server;
 use mmvc_rest::MMVCRest;
 use mmvc_socketio_app::MMVCSocketIOApp;
+mod downloader;
+use downloader::{download_initial_samples, download_weight};
+mod constants;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -119,6 +122,14 @@ async fn local_server(args: Args) {
         rmvpe_onnx: args.rmvpe_onnx.clone(),
         whisper_tiny: args.whisper_tiny.clone(),
     };
+
+    // download required weights and sample models
+    if let Err(e) = download_weight(&vc_params).await {
+        eprintln!("failed to download weights: {e}");
+    }
+    if let Err(e) = download_initial_samples(&args.sample_mode, &args.model_dir).await {
+        eprintln!("failed to download samples: {e}");
+    }
 
     VoiceChangerParamsManager::get_instance().set_params(vc_params.clone());
     let manager = VoiceChangerManager::get_instance(vc_params.clone());
