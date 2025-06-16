@@ -1,15 +1,20 @@
-use axum::{
-    routing::{get, post},
-    Json, Router,
-};
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
 use rcgen::generate_simple_self_signed;
-use serde::{Deserialize, Serialize};
+
 use std::{net::SocketAddr, path::Path};
+use tracing_subscriber::EnvFilter;
 
 mod voice_changer_params;
 use voice_changer_params::VoiceChangerParams;
+mod voice_changer_params_manager;
+use voice_changer_params_manager::VoiceChangerParamsManager;
+mod voice_changer_manager;
+use voice_changer_manager::VoiceChangerManager;
+mod mmvc_rest;
+mod mmvc_socketio_app;
+use mmvc_rest::MMVCRest;
+use mmvc_socketio_app::MMVCSocketIOApp;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -95,41 +100,9 @@ struct Args {
     rmvpe_onnx: String,
 }
 
-#[derive(Serialize)]
-struct Hello {
-    result: &'static str,
-}
 
-async fn hello() -> Json<Hello> {
-    Json(Hello { result: "Index" })
-}
-
-#[derive(Deserialize)]
-struct VoiceModel {
-    timestamp: u64,
-    buffer: String,
-}
-
-#[derive(Serialize)]
-struct TestResponse {
-    timestamp: u64,
-    changed_voice_base64: String,
-}
-
-async fn test(Json(payload): Json<VoiceModel>) -> Json<TestResponse> {
-    // In the Python implementation this would run the voice changer.
-    // Here we simply echo back the input buffer.
-    Json(TestResponse {
-        timestamp: payload.timestamp,
-        changed_voice_base64: payload.buffer,
-    })
-}
-
-#[tokio::main]
-async fn main() {
-    let args = Args::parse();
-
-    let _vc_params = VoiceChangerParams {
+async fn local_server(args: Args) {
+    let vc_params = VoiceChangerParams {
         model_dir: args.model_dir.clone(),
         content_vec_500: args.content_vec_500.clone(),
         content_vec_500_onnx: args.content_vec_500_onnx.clone(),
@@ -145,9 +118,12 @@ async fn main() {
         rmvpe_onnx: args.rmvpe_onnx.clone(),
         whisper_tiny: args.whisper_tiny.clone(),
     };
-    let app = Router::new()
-        .route("/api/hello", get(hello))
-        .route("/test", post(test));
+
+    VoiceChangerParamsManager::get_instance().set_params(vc_params.clone());
+    let _manager = VoiceChangerManager::get_instance(vc_params);
+    let rest = MMVCRest::new();
+    let socket_app = MMVCSocketIOApp::new(rest.router());
+    let app = socket_app.router();
 
     let addr = SocketAddr::new(args.host.parse().unwrap(), args.port);
 
@@ -176,4 +152,13 @@ async fn main() {
             .await
             .unwrap();
     }
+}
+
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new(args.log_level.clone()))
+        .init();
+    local_server(args).await;
 }
