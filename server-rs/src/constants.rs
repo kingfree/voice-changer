@@ -19,3 +19,5 @@ pub const TMP_DIR: &str = "tmp_dir";
 pub const UPLOAD_DIR: &str = "upload_dir";
 /// Directory containing static models.
 pub const MODEL_DIR_STATIC: &str = "model_dir_static";
+/// File to persist settings.
+pub const STORED_SETTING_FILE: &str = "stored_setting.json";
