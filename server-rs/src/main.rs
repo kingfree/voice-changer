@@ -13,6 +13,7 @@ mod voice_changer_manager;
 use voice_changer_manager::VoiceChangerManager;
 mod mmvc_rest;
 mod mmvc_socketio_app;
+mod mmvc_socketio_server;
 use mmvc_rest::MMVCRest;
 use mmvc_socketio_app::MMVCSocketIOApp;
 
@@ -120,9 +121,9 @@ async fn local_server(args: Args) {
     };
 
     VoiceChangerParamsManager::get_instance().set_params(vc_params.clone());
-    let _manager = VoiceChangerManager::get_instance(vc_params);
-    let rest = MMVCRest::new();
-    let socket_app = MMVCSocketIOApp::new(rest.router());
+    let manager = VoiceChangerManager::get_instance(vc_params.clone());
+    let rest = MMVCRest::new(manager);
+    let socket_app = MMVCSocketIOApp::new(rest.router(), manager);
     let app = socket_app.router();
 
     let addr = SocketAddr::new(args.host.parse().unwrap(), args.port);

@@ -86,6 +86,22 @@ impl VoiceChangerManager {
     pub fn merge_models(&self, _request: &str) -> serde_json::Value {
         json!({ "status": "OK" })
     }
+
+    pub fn get_performance(&self) -> serde_json::Value {
+        json!({ "status": "OK" })
+    }
+
+    pub fn update_model_default(&self) -> serde_json::Value {
+        self.get_info()
+    }
+
+    pub fn update_model_info(&self, _new_data: &str) -> serde_json::Value {
+        self.get_info()
+    }
+
+    pub fn upload_model_assets(&self, _params: &str) -> serde_json::Value {
+        self.get_info()
+    }
 }
 
 impl VoiceChangerManager {
