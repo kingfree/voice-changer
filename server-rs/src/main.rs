@@ -1,7 +1,9 @@
 use axum::{routing::{get, post}, Router, Json};
 use serde::{Deserialize, Serialize};
 use clap::Parser;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::Path};
+use axum_server::tls_rustls::RustlsConfig;
+use rcgen::generate_simple_self_signed;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -13,6 +15,22 @@ struct Args {
     /// Host address to bind
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
+
+    /// Enable HTTPS
+    #[arg(long, default_value_t = false)]
+    https: bool,
+
+    /// Path to TLS private key
+    #[arg(long, default_value = "ssl.key")]
+    https_key: String,
+
+    /// Path to TLS certificate
+    #[arg(long, default_value = "ssl.cert")]
+    https_cert: String,
+
+    /// Generate self-signed certificate when using HTTPS
+    #[arg(long, default_value_t = true)]
+    https_self_signed: bool,
 }
 
 #[derive(Serialize)]
@@ -53,10 +71,30 @@ async fn main() {
         .route("/test", post(test));
 
     let addr = SocketAddr::new(args.host.parse().unwrap(), args.port);
-    println!("Starting server on http://{}", addr);
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    if args.https {
+        // generate self-signed certificate if requested
+        if args.https_self_signed
+            && (!Path::new(&args.https_key).exists() || !Path::new(&args.https_cert).exists())
+        {
+            let cert = generate_simple_self_signed(["localhost".into()]).unwrap();
+            std::fs::write(&args.https_key, cert.key_pair.serialize_pem()).unwrap();
+            std::fs::write(&args.https_cert, cert.cert.pem()).unwrap();
+        }
+
+        println!("Starting HTTPS server on https://{}", addr);
+        let config = RustlsConfig::from_pem_file(&args.https_cert, &args.https_key)
+            .await
+            .expect("failed to load certs");
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    } else {
+        println!("Starting server on http://{}", addr);
+        axum::Server::bind(&addr)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    }
 }
