@@ -32,7 +32,7 @@ impl Default for RVCModelSlot {
 
 pub struct ModelSlotManager {
     model_dir: String,
-    slots: RwLock<Vec<ModelSlot>>,
+    slots: RwLock<Vec<ModelSlot>>, 
 }
 
 impl ModelSlotManager {
