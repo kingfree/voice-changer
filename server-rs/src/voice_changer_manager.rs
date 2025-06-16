@@ -10,6 +10,7 @@ use crate::voice_changer::VoiceChanger;
 use crate::plugin::VCModelPlugin;
 use crate::rvc::RvcPlugin;
 use crate::model_slot::{ModelSlot, RVCModelSlot};
+use crate::model_slot_manager::ModelSlotManager;
 
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -65,6 +66,7 @@ pub struct VoiceChangerManager {
     stored_setting: RwLock<HashMap<String, Value>>,
     plugins: RwLock<HashMap<String, Arc<dyn VCModelPlugin>>>,
     current_slot: RwLock<Option<ModelSlot>>,
+    model_slot_manager: ModelSlotManager,
 }
 
 static INSTANCE: OnceCell<VoiceChangerManager> = OnceCell::new();
@@ -72,6 +74,7 @@ static INSTANCE: OnceCell<VoiceChangerManager> = OnceCell::new();
 impl VoiceChangerManager {
     pub fn get_instance(params: VoiceChangerParams) -> &'static VoiceChangerManager {
         INSTANCE.get_or_init(|| {
+            let msm = ModelSlotManager::new(params.model_dir.clone());
             let mut m = Self {
                 params,
                 settings: RwLock::new(VoiceChangerManagerSettings::default()),
@@ -81,6 +84,7 @@ impl VoiceChangerManager {
                 stored_setting: RwLock::new(HashMap::new()),
                 plugins: RwLock::new(HashMap::new()),
                 current_slot: RwLock::new(None),
+                model_slot_manager: msm,
             };
             m.register_plugin(RvcPlugin);
             m.load_stored_settings();
@@ -119,6 +123,7 @@ impl VoiceChangerManager {
                 model_file: path.clone(),
                 sampling_rate: 48000,
             });
+            let _ = self.model_slot_manager.save_model_slot(params.slot as usize, &slot);
             if let Ok(mut cur) = self.current_slot.write() {
                 *cur = Some(slot.clone());
             }
@@ -198,16 +203,24 @@ impl VoiceChangerManager {
 
     pub fn update_model_default(&self) -> serde_json::Value {
         self.voice_changer.update_model_default();
+        if let Ok(s) = self.settings.read() {
+            if s.model_slot_index >= 0 {
+                let data = serde_json::json!({"slot": s.model_slot_index, "key": "updated", "val": true}).to_string();
+                let _ = self.model_slot_manager.update_model_info(&data);
+            }
+        }
         self.get_info()
     }
 
     pub fn update_model_info(&self, new_data: &str) -> serde_json::Value {
         self.voice_changer.update_model_info(new_data);
+        let _ = self.model_slot_manager.update_model_info(new_data);
         self.get_info()
     }
 
     pub fn upload_model_assets(&self, params: &str) -> serde_json::Value {
         self.voice_changer.upload_model_assets(params);
+        let _ = self.model_slot_manager.store_model_assets(params);
         self.get_info()
     }
 }
