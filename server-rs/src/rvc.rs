@@ -3,6 +3,7 @@ pub trait VCModel: Send + Sync {
     fn inference(&self, input: &[i16]) -> Vec<i16>;
 }
 
+use crate::model_slot::{ModelSlot, RVCModelSlot};
 use crate::plugin::VCModelPlugin;
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -35,7 +36,10 @@ impl VCModelPlugin for RvcPlugin {
         "RVC"
     }
 
-    fn create_model(&self, _params: &VoiceChangerParams, path: &str) -> Box<dyn VCModel> {
-        Box::new(Rvc::new(48000, path.to_string()))
+    fn create_model(&self, _params: &VoiceChangerParams, slot: &ModelSlot) -> Box<dyn VCModel> {
+        match slot {
+            ModelSlot::RVC(info) => Box::new(Rvc::new(info.sampling_rate, info.model_file.clone())),
+            _ => Box::new(Rvc::new(48000, String::new())),
+        }
     }
 }

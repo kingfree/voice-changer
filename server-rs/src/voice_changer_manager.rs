@@ -9,6 +9,7 @@ use crate::constants::STORED_SETTING_FILE;
 use crate::voice_changer::VoiceChanger;
 use crate::plugin::VCModelPlugin;
 use crate::rvc::RvcPlugin;
+use crate::model_slot::{ModelSlot, RVCModelSlot};
 
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -63,6 +64,7 @@ pub struct VoiceChangerManager {
     voice_changer: VoiceChanger,
     stored_setting: RwLock<HashMap<String, Value>>,
     plugins: RwLock<HashMap<String, Arc<dyn VCModelPlugin>>>,
+    current_slot: RwLock<Option<ModelSlot>>,
 }
 
 static INSTANCE: OnceCell<VoiceChangerManager> = OnceCell::new();
@@ -78,6 +80,7 @@ impl VoiceChangerManager {
                 voice_changer: VoiceChanger::new(),
                 stored_setting: RwLock::new(HashMap::new()),
                 plugins: RwLock::new(HashMap::new()),
+                current_slot: RwLock::new(None),
             };
             m.register_plugin(RvcPlugin);
             m.load_stored_settings();
@@ -112,13 +115,20 @@ impl VoiceChangerManager {
             if let Ok(mut m) = self.model_path.write() {
                 *m = Some(path.clone());
             }
+            let slot = ModelSlot::RVC(RVCModelSlot {
+                model_file: path.clone(),
+                sampling_rate: 48000,
+            });
+            if let Ok(mut cur) = self.current_slot.write() {
+                *cur = Some(slot.clone());
+            }
             if let Some(plugin) = self
                 .plugins
                 .read()
                 .ok()
                 .and_then(|map| map.get(&params.voice_changer_type).cloned())
             {
-                let model = plugin.create_model(&self.params, &path);
+                let model = plugin.create_model(&self.params, &slot);
                 self.voice_changer.set_model_box(model);
             }
         }
@@ -260,6 +270,9 @@ impl VoiceChangerManager {
         self.voice_changer.reset();
         if let Ok(mut st) = self.stored_setting.write() {
             st.clear();
+        }
+        if let Ok(mut c) = self.current_slot.write() {
+            *c = None;
         }
     }
 }
