@@ -59,9 +59,10 @@ async fn post_upload_file(mut multipart: Multipart) -> Json<Value> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ConcatParams {
     filename: String,
-    filenameChunkNum: usize,
+    filename_chunk_num: usize,
 }
 
 async fn post_concat_uploaded_file(Form(params): Form<ConcatParams>) -> Json<Value> {
@@ -77,7 +78,7 @@ async fn post_concat_uploaded_file(Form(params): Form<ConcatParams>) -> Json<Val
         Ok(f) => f,
         Err(_) => return Json(json!({"status":"ERROR","msg":"open"})),
     };
-    for i in 0..params.filenameChunkNum {
+    for i in 0..params.filename_chunk_num {
         let chunk = PathBuf::from(UPLOAD_DIR).join(format!("{}_{}", safe_name, i));
         if let Ok(mut cfile) = fs::File::open(&chunk).await {
             if let Ok(data) = fs::read(&chunk).await {
@@ -114,9 +115,10 @@ async fn post_update_settings(Form(params): Form<UpdateParams>) -> Json<Value> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct LoadModelParams {
     slot: i32,
-    isHalf: bool,
+    is_half: bool,
     params: String,
 }
 
@@ -148,13 +150,14 @@ async fn post_update_model_default() -> Json<Value> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateModelInfo {
-    newData: String,
+    new_data: String,
 }
 
 async fn post_update_model_info(Form(params): Form<UpdateModelInfo>) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
-    Json(manager.update_model_info(&params.newData))
+    Json(manager.update_model_info(&params.new_data))
 }
 
 #[derive(Deserialize)]
