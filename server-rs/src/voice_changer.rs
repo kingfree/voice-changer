@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::RwLock;
 
 use crate::constants::TMP_DIR;
+use crate::rvc::{VCModel, Rvc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceChangerSettings {
@@ -34,6 +35,7 @@ impl Default for VoiceChangerSettings {
 pub struct VoiceChanger {
     settings: RwLock<VoiceChangerSettings>,
     prev_audio: RwLock<Vec<i16>>,
+    model: RwLock<Option<Box<dyn VCModel>>>,
     #[cfg(test)]
     exported_path: RwLock<Option<String>>,
 }
@@ -43,6 +45,7 @@ impl VoiceChanger {
         Self {
             settings: RwLock::new(VoiceChangerSettings::default()),
             prev_audio: RwLock::new(Vec::new()),
+            model: RwLock::new(None),
             #[cfg(test)]
             exported_path: RwLock::new(None),
         }
@@ -57,13 +60,22 @@ impl VoiceChanger {
             ),
             Err(_) => return input.to_vec(),
         };
-        let mut out = input.to_vec();
+        let processed = {
+            match self.model.read() {
+                Ok(m) => match &*m {
+                    Some(model) => model.inference(input),
+                    None => input.to_vec(),
+                },
+                Err(_) => input.to_vec(),
+            }
+        };
+        let mut out = processed.clone();
         let mut prev = match self.prev_audio.write() {
             Ok(p) => p,
             Err(_) => return input.to_vec(),
         };
-        let n = if prev.len() == input.len() {
-            overlap.min(input.len())
+        let n = if prev.len() == out.len() {
+            overlap.min(out.len())
         } else {
             0
         };
@@ -71,7 +83,7 @@ impl VoiceChanger {
             let (prev_strength, cur_strength) = generate_strength(n, offset_rate, end_rate);
             for i in 0..n {
                 let p = prev[i] as f32 * prev_strength[i];
-                let c = input[i] as f32 * cur_strength[i];
+                let c = out[i] as f32 * cur_strength[i];
                 out[i] = (p + c) as i16;
             }
         }
@@ -127,6 +139,44 @@ impl VoiceChanger {
             .read()
             .map(|s| s.clone())
             .unwrap_or_else(|_| VoiceChangerSettings::default())
+    }
+
+    pub fn get_performance(&self) -> Vec<f32> {
+        self.settings
+            .read()
+            .map(|s| s.performance.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn set_input_sample_rate(&self, sr: i32) {
+        if let Ok(mut s) = self.settings.write() {
+            s.input_sample_rate = sr;
+        }
+    }
+
+    pub fn set_output_sample_rate(&self, sr: i32) {
+        if let Ok(mut s) = self.settings.write() {
+            s.output_sample_rate = sr;
+        }
+    }
+
+    pub fn get_processing_sampling_rate(&self) -> i32 {
+        self.model
+            .read()
+            .ok()
+            .and_then(|m| m.as_ref().map(|m| m.processing_sample_rate()))
+            .unwrap_or_else(|| {
+                self.settings
+                    .read()
+                    .map(|s| s.output_sample_rate)
+                    .unwrap_or(0)
+            })
+    }
+
+    pub fn set_model<M: VCModel + 'static>(&self, model: M) {
+        if let Ok(mut m) = self.model.write() {
+            *m = Some(Box::new(model));
+        }
     }
 
     /// Clear buffered audio used for cross fading.
@@ -217,6 +267,9 @@ impl VoiceChanger {
             *s = VoiceChangerSettings::default();
         }
         self.clear_prev_audio();
+        if let Ok(mut m) = self.model.write() {
+            *m = None;
+        }
         if let Ok(mut ep) = self.exported_path.write() {
             *ep = None;
         }
@@ -245,4 +298,40 @@ fn generate_strength(size: usize, offset_rate: f32, end_rate: f32) -> (Vec<f32>,
         }
     }
     (prev, cur)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct DummyModel;
+
+    impl VCModel for DummyModel {
+        fn processing_sample_rate(&self) -> i32 {
+            16000
+        }
+        fn inference(&self, input: &[i16]) -> Vec<i16> {
+            input.to_vec()
+        }
+    }
+
+    #[test]
+    fn sample_rate_methods() {
+        let vc = VoiceChanger::new();
+        vc.set_input_sample_rate(24000);
+        vc.set_output_sample_rate(24000);
+        let info = vc.get_info();
+        assert_eq!(info.input_sample_rate, 24000);
+        assert_eq!(info.output_sample_rate, 24000);
+    }
+
+    #[test]
+    fn model_inference_and_processing_rate() {
+        let vc = VoiceChanger::new();
+        vc.set_model(DummyModel);
+        let rate = vc.get_processing_sampling_rate();
+        assert_eq!(rate, 16000);
+        let out = vc.change_voice(&[1, 2, 3]);
+        assert_eq!(out, vec![1, 2, 3]);
+    }
 }
