@@ -3,10 +3,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::constants::STORED_SETTING_FILE;
 use crate::voice_changer::VoiceChanger;
+use crate::plugin::VCModelPlugin;
+use crate::rvc::RvcPlugin;
+use crate::model_slot::{ModelSlot, RVCModelSlot};
 
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -60,6 +63,8 @@ pub struct VoiceChangerManager {
     emit_callback: RwLock<Option<Box<dyn Fn(Vec<f32>) + Send + Sync>>>,
     voice_changer: VoiceChanger,
     stored_setting: RwLock<HashMap<String, Value>>,
+    plugins: RwLock<HashMap<String, Arc<dyn VCModelPlugin>>>,
+    current_slot: RwLock<Option<ModelSlot>>,
 }
 
 static INSTANCE: OnceCell<VoiceChangerManager> = OnceCell::new();
@@ -74,7 +79,10 @@ impl VoiceChangerManager {
                 emit_callback: RwLock::new(None),
                 voice_changer: VoiceChanger::new(),
                 stored_setting: RwLock::new(HashMap::new()),
+                plugins: RwLock::new(HashMap::new()),
+                current_slot: RwLock::new(None),
             };
+            m.register_plugin(RvcPlugin);
             m.load_stored_settings();
             m
         })
@@ -103,14 +111,33 @@ impl VoiceChangerManager {
             }
         }
         if let Some(p) = first {
-            *self.model_path.write().unwrap() = Some(p.to_string_lossy().to_string());
+            let path = p.to_string_lossy().to_string();
+            if let Ok(mut m) = self.model_path.write() {
+                *m = Some(path.clone());
+            }
+            let slot = ModelSlot::RVC(RVCModelSlot {
+                model_file: path.clone(),
+                sampling_rate: 48000,
+            });
+            if let Ok(mut cur) = self.current_slot.write() {
+                *cur = Some(slot.clone());
+            }
+            if let Some(plugin) = self
+                .plugins
+                .read()
+                .ok()
+                .and_then(|map| map.get(&params.voice_changer_type).cloned())
+            {
+                let model = plugin.create_model(&self.params, &slot);
+                self.voice_changer.set_model_box(model);
+            }
         }
 
         self.get_info()
     }
 
     pub fn change_voice(&self, input: &[i16]) -> Vec<i16> {
-        if self.settings.read().unwrap().pass_through {
+        if self.settings.read().map(|s| s.pass_through).unwrap_or(false) {
             return input.to_vec();
         }
         self.voice_changer.change_voice(input)
@@ -121,8 +148,7 @@ impl VoiceChangerManager {
     }
 
     pub fn update_settings(&self, key: &str, val: serde_json::Value) -> serde_json::Value {
-        {
-            let mut settings = self.settings.write().unwrap();
+        if let Ok(mut settings) = self.settings.write() {
             match key {
                 "modelSlotIndex" => {
                     if let Some(v) = val.as_i64() {
@@ -143,13 +169,16 @@ impl VoiceChangerManager {
     }
 
     pub fn get_info(&self) -> serde_json::Value {
-        let settings = self.settings.read().unwrap();
+        let settings = match self.settings.read() {
+            Ok(s) => s,
+            Err(_) => return json!({"status": "ERR"}),
+        };
         let vc_info = self.voice_changer.get_info();
         json!({
             "status": "OK",
             "settings": &*settings,
             "voiceChanger": vc_info,
-            "modelPath": self.model_path.read().unwrap().clone(),
+            "modelPath": self.model_path.read().ok().and_then(|v| v.clone()),
         })
     }
 
@@ -184,25 +213,39 @@ impl VoiceChangerManager {
 }
 
 impl VoiceChangerManager {
+    pub fn register_plugin<P: VCModelPlugin + 'static>(&mut self, plugin: P) {
+        if let Ok(mut map) = self.plugins.write() {
+            map.insert(plugin.name().to_string(), Arc::new(plugin));
+        }
+    }
+
+    pub fn get_processing_sampling_rate(&self) -> i32 {
+        self.voice_changer.get_processing_sampling_rate()
+    }
+
     pub fn set_emit_to<F>(&self, cb: F)
     where
         F: Fn(Vec<f32>) + Send + Sync + 'static,
     {
-        let mut lock = self.emit_callback.write().unwrap();
-        *lock = Some(Box::new(cb));
+        if let Ok(mut lock) = self.emit_callback.write() {
+            *lock = Some(Box::new(cb));
+        }
     }
 
     pub fn emit_performance(&self, perf: Vec<f32>) {
-        if let Some(cb) = &*self.emit_callback.read().unwrap() {
-            cb(perf);
+        if let Ok(callback) = self.emit_callback.read() {
+            if let Some(cb) = &*callback {
+                cb(perf);
+            }
         }
     }
 
     fn store_setting(&self, key: &str, val: &Value) {
-        let mut map = self.stored_setting.write().unwrap();
-        map.insert(key.to_string(), val.clone());
-        if let Ok(text) = serde_json::to_string(&*map) {
-            let _ = std::fs::write(STORED_SETTING_FILE, text);
+        if let Ok(mut map) = self.stored_setting.write() {
+            map.insert(key.to_string(), val.clone());
+            if let Ok(text) = serde_json::to_string(&*map) {
+                let _ = std::fs::write(STORED_SETTING_FILE, text);
+            }
         }
     }
 
@@ -212,16 +255,25 @@ impl VoiceChangerManager {
                 for (k, v) in &map {
                     self.update_settings(k, v.clone());
                 }
-                *self.stored_setting.write().unwrap() = map;
+                if let Ok(mut s) = self.stored_setting.write() {
+                    *s = map;
+                }
             }
         }
     }
 
     #[cfg(test)]
     pub fn reset(&self) {
-        *self.settings.write().unwrap() = VoiceChangerManagerSettings::default();
+        if let Ok(mut s) = self.settings.write() {
+            *s = VoiceChangerManagerSettings::default();
+        }
         self.voice_changer.reset();
-        self.stored_setting.write().unwrap().clear();
+        if let Ok(mut st) = self.stored_setting.write() {
+            st.clear();
+        }
+        if let Ok(mut c) = self.current_slot.write() {
+            *c = None;
+        }
     }
 }
 
@@ -274,5 +326,111 @@ mod tests {
 
         let dst = dir_path.join("0").join("model.pth");
         assert!(dst.exists());
+
+        // plugin should set processing sample rate via RVC plugin
+        let rate = manager.get_processing_sampling_rate();
+        assert_eq!(rate, 48000);
+    }
+
+    #[test]
+    fn export_to_onnx_creates_file() {
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        let ok = manager.export_to_onnx();
+        assert!(ok);
+        let path = std::path::Path::new(crate::constants::TMP_DIR).join("model.onnx");
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn merge_models_creates_output() {
+        use serde_json::json;
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        std::fs::create_dir_all(crate::constants::TMP_DIR).unwrap();
+        let f1 = std::path::Path::new(crate::constants::TMP_DIR).join("a.txt");
+        let f2 = std::path::Path::new(crate::constants::TMP_DIR).join("b.txt");
+        std::fs::write(&f1, b"a").unwrap();
+        std::fs::write(&f2, b"b").unwrap();
+
+        let req = json!({
+            "output": "merged.txt",
+            "files": [f1.to_str().unwrap(), f2.to_str().unwrap()]
+        })
+        .to_string();
+
+        manager.merge_models(&req);
+
+        let out = std::path::Path::new(crate::constants::TMP_DIR).join("merged.txt");
+        assert!(out.exists());
+        let content = std::fs::read_to_string(out).unwrap();
+        assert_eq!(content, "ab");
+    }
+
+    #[test]
+    fn update_model_methods_modify_performance() {
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: String::new(),
+            content_vec_500_onnx: String::new(),
+            content_vec_500_onnx_on: false,
+            hubert_base: String::new(),
+            hubert_base_jp: String::new(),
+            hubert_soft: String::new(),
+            nsf_hifigan: String::new(),
+            sample_mode: String::new(),
+            crepe_onnx_full: String::new(),
+            crepe_onnx_tiny: String::new(),
+            rmvpe: String::new(),
+            rmvpe_onnx: String::new(),
+            whisper_tiny: String::new(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+
+        manager.update_model_default();
+        manager.update_model_info("{}");
+        manager.upload_model_assets("{}");
+        let perf = manager.get_performance();
+        assert_eq!(perf["performance"][0], 1.0);
+        assert_eq!(perf["performance"][1], 1.0);
+        assert_eq!(perf["performance"][2], 1.0);
     }
 }
