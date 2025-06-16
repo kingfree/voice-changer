@@ -238,7 +238,7 @@ impl VoiceChanger {
         true
     }
 
-    /// Update model defaults. mark by updating performance[0].
+    /// Update model defaults by incrementing `performance[0]`.
     pub fn update_model_default(&self) {
         if let Ok(mut s) = self.settings.write() {
             if let Some(p) = s.performance.get_mut(0) {
@@ -247,7 +247,7 @@ impl VoiceChanger {
         }
     }
 
-    /// Update model metadata, mark by updating performance[1].
+    /// Update model metadata by incrementing `performance[1]`.
     pub fn update_model_info(&self, _new_data: &str) {
         if let Ok(mut s) = self.settings.write() {
             if let Some(p) = s.performance.get_mut(1) {
@@ -256,7 +256,7 @@ impl VoiceChanger {
         }
     }
 
-    /// Upload additional model assets, mark by updating performance[2].
+    /// Upload additional model assets by incrementing `performance[2]`.
     pub fn upload_model_assets(&self, _params: &str) {
         if let Ok(mut s) = self.settings.write() {
             if let Some(p) = s.performance.get_mut(2) {
