@@ -112,10 +112,34 @@ impl VoiceChanger {
         self.settings.read().unwrap().clone()
     }
 
+    /// Clear buffered audio used for cross fading.
+    pub fn clear_prev_audio(&self) {
+        self.prev_audio.write().unwrap().clear();
+    }
+
+    /// Export the currently loaded model to ONNX.
+    pub fn export_to_onnx(&self) -> bool {
+        false
+    }
+
+    /// Merge models based on the given JSON request.
+    pub fn merge_models(&self, _request: &str) -> bool {
+        false
+    }
+
+    /// Update model defaults. Placeholder implementation.
+    pub fn update_model_default(&self) {}
+
+    /// Update model metadata. Placeholder implementation.
+    pub fn update_model_info(&self, _new_data: &str) {}
+
+    /// Upload additional model assets. Placeholder implementation.
+    pub fn upload_model_assets(&self, _params: &str) {}
+
     #[cfg(test)]
     pub fn reset(&self) {
         *self.settings.write().unwrap() = VoiceChangerSettings::default();
-        self.prev_audio.write().unwrap().clear();
+        self.clear_prev_audio();
     }
 }
 

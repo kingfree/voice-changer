@@ -1,12 +1,12 @@
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::RwLock;
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
-use crate::voice_changer::VoiceChanger;
 use crate::constants::STORED_SETTING_FILE;
+use crate::voice_changer::VoiceChanger;
 
 use crate::voice_changer_params::VoiceChangerParams;
 
@@ -116,6 +116,10 @@ impl VoiceChangerManager {
         self.voice_changer.change_voice(input)
     }
 
+    pub fn clear_prev_audio(&self) {
+        self.voice_changer.clear_prev_audio();
+    }
+
     pub fn update_settings(&self, key: &str, val: serde_json::Value) -> serde_json::Value {
         {
             let mut settings = self.settings.write().unwrap();
@@ -150,12 +154,12 @@ impl VoiceChangerManager {
     }
 
     pub fn export_to_onnx(&self) -> bool {
-        // placeholder always returns false
-        false
+        self.voice_changer.export_to_onnx()
     }
 
-    pub fn merge_models(&self, _request: &str) -> serde_json::Value {
-        json!({ "status": "OK" })
+    pub fn merge_models(&self, request: &str) -> serde_json::Value {
+        self.voice_changer.merge_models(request);
+        self.get_info()
     }
 
     pub fn get_performance(&self) -> serde_json::Value {
@@ -164,14 +168,17 @@ impl VoiceChangerManager {
     }
 
     pub fn update_model_default(&self) -> serde_json::Value {
+        self.voice_changer.update_model_default();
         self.get_info()
     }
 
-    pub fn update_model_info(&self, _new_data: &str) -> serde_json::Value {
+    pub fn update_model_info(&self, new_data: &str) -> serde_json::Value {
+        self.voice_changer.update_model_info(new_data);
         self.get_info()
     }
 
-    pub fn upload_model_assets(&self, _params: &str) -> serde_json::Value {
+    pub fn upload_model_assets(&self, params: &str) -> serde_json::Value {
+        self.voice_changer.upload_model_assets(params);
         self.get_info()
     }
 }
@@ -256,7 +263,10 @@ mod tests {
             slot: 0,
             is_sample_mode: false,
             sample_id: String::new(),
-            files: vec![LoadModelParamFile { name: "model.pth".into(), dir: String::new() }],
+            files: vec![LoadModelParamFile {
+                name: "model.pth".into(),
+                dir: String::new(),
+            }],
             params: serde_json::json!({}),
         };
 
