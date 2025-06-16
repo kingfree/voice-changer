@@ -1,3 +1,9 @@
+//! File upload and model management REST API.
+//!
+//! This module contains handlers roughly corresponding to the Python
+//! implementation.  They are intentionally simple and documented so that
+//! generated documentation can describe the available endpoints.
+
 use axum::{
     extract::{Form, Multipart},
     routing::{get, post},
@@ -11,11 +17,14 @@ use tokio::{fs, io::AsyncWriteExt};
 
 use crate::voice_changer_manager::VoiceChangerManager;
 
+/// Directory used for temporarily storing uploaded chunks.
 const UPLOAD_DIR: &str = "upload_dir";
+/// Directory containing saved models.
 const MODEL_DIR: &str = "logs";
 
 static MANAGER: OnceCell<&'static VoiceChangerManager> = OnceCell::new();
 
+/// Remove any directory components from user provided file names.
 fn sanitize_filename(filename: &str) -> String {
     Path::new(filename)
         .file_name()
@@ -24,6 +33,10 @@ fn sanitize_filename(filename: &str) -> String {
         .to_string()
 }
 
+/// `POST /upload_file`
+///
+/// Accept a multipart request containing a file and store it in
+/// [`UPLOAD_DIR`].  The form fields `filename` and `file` are expected.
 async fn post_upload_file(mut multipart: Multipart) -> Json<Value> {
     let mut filename: Option<String> = None;
     let mut file_bytes: Option<Vec<u8>> = None;
@@ -65,10 +78,15 @@ async fn post_upload_file(mut multipart: Multipart) -> Json<Value> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ConcatParams {
+    /// Name of the final file to create.
     filename: String,
+    /// Number of chunks that were uploaded.
     filename_chunk_num: usize,
 }
 
+/// `POST /concat_uploaded_file`
+///
+/// Combine previously uploaded chunks into a single file.
 async fn post_concat_uploaded_file(Form(params): Form<ConcatParams>) -> Json<Value> {
     let safe_name = sanitize_filename(&params.filename);
     let target = PathBuf::from(UPLOAD_DIR).join(&safe_name);
@@ -101,11 +119,17 @@ async fn post_concat_uploaded_file(Form(params): Form<ConcatParams>) -> Json<Val
     Json(json!({"status":"OK","msg":format!("concat files {}", safe_name)}))
 }
 
+/// `GET /info`
+///
+/// Return current server information, mirroring the Python API.
 async fn get_info() -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     Json(manager.get_info())
 }
 
+/// `GET /performance`
+///
+/// Return performance counters for the current model.
 async fn get_performance() -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     Json(manager.get_performance())
@@ -113,10 +137,15 @@ async fn get_performance() -> Json<Value> {
 
 #[derive(Deserialize)]
 struct UpdateParams {
+    /// Setting key to update.
     key: String,
+    /// New value as JSON or plain string.
     val: String,
 }
 
+/// `POST /update_settings`
+///
+/// Update global settings by key.
 async fn post_update_settings(Form(params): Form<UpdateParams>) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     let val: Value = serde_json::from_str(&params.val).unwrap_or(Value::String(params.val));
@@ -126,14 +155,22 @@ async fn post_update_settings(Form(params): Form<UpdateParams>) -> Json<Value> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoadModelPayload {
+    /// Target slot index.
     slot: i32,
+    /// Whether to load the model using half precision.
     is_half: bool,
+    /// Additional JSON parameters.
     params: String,
 }
 
+/// `POST /load_model`
+///
+/// Load a voice model based on uploaded assets.
 async fn post_load_model(Form(payload): Form<LoadModelPayload>) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
-    if let Ok(req) = serde_json::from_str::<crate::voice_changer_manager::LoadModelRequest>(&payload.params) {
+    if let Ok(req) =
+        serde_json::from_str::<crate::voice_changer_manager::LoadModelRequest>(&payload.params)
+    {
         Json(manager.load_model(req))
     } else {
         Json(json!({"status": "ERROR", "msg": "invalid params"}))
@@ -142,19 +179,29 @@ async fn post_load_model(Form(payload): Form<LoadModelPayload>) -> Json<Value> {
 
 #[derive(Deserialize)]
 struct MergeParams {
+    /// JSON request string describing the merge.
     request: String,
 }
 
+/// `POST /merge_model`
+///
+/// Merge two models according to the provided request.
 async fn post_merge_models(Form(params): Form<MergeParams>) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     Json(manager.merge_models(&params.request))
 }
 
+/// `GET /onnx`
+///
+/// Export the current model to ONNX format if possible.
 async fn get_onnx() -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     Json(json!({"exported": manager.export_to_onnx()}))
 }
 
+/// `POST /update_model_default`
+///
+/// Update the default model configuration.
 async fn post_update_model_default() -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     Json(manager.update_model_default())
@@ -163,9 +210,13 @@ async fn post_update_model_default() -> Json<Value> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateModelInfo {
+    /// JSON metadata to write.
     new_data: String,
 }
 
+/// `POST /update_model_info`
+///
+/// Write metadata to the current model slot.
 async fn post_update_model_info(Form(params): Form<UpdateModelInfo>) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     Json(manager.update_model_info(&params.new_data))
@@ -173,19 +224,25 @@ async fn post_update_model_info(Form(params): Form<UpdateModelInfo>) -> Json<Val
 
 #[derive(Deserialize)]
 struct UploadModelAssets {
+    /// JSON request describing the asset move.
     params: String,
 }
 
+/// `POST /upload_model_assets`
+///
+/// Move uploaded model assets into the selected slot.
 async fn post_upload_model_assets(Form(params): Form<UploadModelAssets>) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
     Json(manager.upload_model_assets(&params.params))
 }
 
+/// Sub-router providing file upload and model management endpoints.
 pub struct MMVCRestFileuploader {
     router: Router,
 }
 
 impl MMVCRestFileuploader {
+    /// Create a new instance configured with a [`VoiceChangerManager`].
     pub fn new(manager: &'static VoiceChangerManager) -> Self {
         MANAGER.set(manager).ok();
         let router = Router::new()
@@ -203,6 +260,7 @@ impl MMVCRestFileuploader {
         Self { router }
     }
 
+    /// Consume the object and return the configured [`Router`].
     pub fn router(self) -> Router {
         self.router
     }
