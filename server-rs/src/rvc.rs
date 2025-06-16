@@ -1,10 +1,30 @@
-pub trait VCModel: Send + Sync {
+/// Trait mirroring the Python `VoiceChangerModel` protocol.
+pub trait VoiceChangerModel: Send + Sync {
+    /// Return the sample rate expected by the model.
     fn processing_sample_rate(&self) -> i32;
+    /// Run inference on an audio buffer.
     fn inference(&self, input: &[i16]) -> Vec<i16>;
+    /// Update internal settings using a key/value pair.
+    fn update_settings(&mut self, key: &str, val: Value) -> bool;
+    /// Return a JSON object describing current settings.
+    fn get_info(&self) -> Value;
+    /// Prepare model input. The default implementation simply returns the
+    /// received audio and a calculated volume.
+    fn generate_input(
+        &mut self,
+        new_data: &[i16],
+        input_size: usize,
+        crossfade_size: usize,
+        sola_search_frame: usize,
+    ) -> (Vec<i16>, Vec<i16>, Vec<i16>, usize, f32, usize);
 }
 
+/// Marker trait used throughout the Rust server implementation.  It extends
+/// [`VoiceChangerModel`] so concrete models only need to implement that one.
+pub trait VCModel: VoiceChangerModel {}
+
 use crate::constants::TMP_DIR;
-use crate::model_slot::{ModelSlot, RVCModelSlot};
+use crate::model_slot::ModelSlot;
 use crate::plugin::VCModelPlugin;
 use crate::voice_changer_params::VoiceChangerParams;
 use serde::{Deserialize, Serialize};
@@ -58,6 +78,7 @@ pub struct Rvc {
     #[allow(dead_code)]
     path: String,
     settings: RvcSettings,
+    audio_buffer: Vec<i16>,
 }
 
 impl Rvc {
@@ -66,6 +87,7 @@ impl Rvc {
             sample_rate,
             path,
             settings: RvcSettings::default(),
+            audio_buffer: Vec::new(),
         }
     }
 
@@ -156,7 +178,7 @@ impl Rvc {
     }
 }
 
-impl VCModel for Rvc {
+impl VoiceChangerModel for Rvc {
     fn processing_sample_rate(&self) -> i32 {
         self.sample_rate
     }
@@ -164,7 +186,61 @@ impl VCModel for Rvc {
     fn inference(&self, input: &[i16]) -> Vec<i16> {
         input.to_vec()
     }
+
+    fn update_settings(&mut self, key: &str, val: Value) -> bool {
+        Rvc::update_settings(self, key, val)
+    }
+
+    fn get_info(&self) -> Value {
+        Rvc::get_info(self)
+    }
+
+    fn generate_input(
+        &mut self,
+        new_data: &[i16],
+        input_size: usize,
+        crossfade_size: usize,
+        sola_search_frame: usize,
+    ) -> (Vec<i16>, Vec<i16>, Vec<i16>, usize, f32, usize) {
+        // Simplified implementation mirroring the Python interface.
+        let convert_size = input_size
+            + crossfade_size
+            + sola_search_frame
+            + self.settings.extra_convert_size as usize;
+        self.audio_buffer.extend_from_slice(new_data);
+        if self.audio_buffer.len() > convert_size {
+            let excess = self.audio_buffer.len() - convert_size;
+            self.audio_buffer.drain(0..excess);
+        }
+        let vol_segment = self
+            .audio_buffer
+            .iter()
+            .rev()
+            .take(input_size + crossfade_size)
+            .cloned()
+            .collect::<Vec<_>>();
+        let vol = if vol_segment.is_empty() {
+            0.0
+        } else {
+            let mean = vol_segment
+                .iter()
+                .map(|v| *v as f32 * *v as f32)
+                .sum::<f32>()
+                / vol_segment.len() as f32;
+            mean.sqrt()
+        };
+        (
+            self.audio_buffer.clone(),
+            Vec::new(),
+            Vec::new(),
+            convert_size,
+            vol,
+            input_size + crossfade_size,
+        )
+    }
 }
+
+impl VCModel for Rvc {}
 
 pub struct RvcPlugin;
 

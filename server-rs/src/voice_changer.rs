@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::RwLock;
 
 use crate::constants::TMP_DIR;
-use crate::rvc::{VCModel, Rvc};
+use crate::rvc::VCModel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceChangerSettings {
@@ -307,17 +307,46 @@ fn generate_strength(size: usize, offset_rate: f32, end_rate: f32) -> (Vec<f32>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rvc::VoiceChangerModel;
 
     struct DummyModel;
 
-    impl VCModel for DummyModel {
+    impl VoiceChangerModel for DummyModel {
         fn processing_sample_rate(&self) -> i32 {
             16000
         }
+
         fn inference(&self, input: &[i16]) -> Vec<i16> {
             input.to_vec()
         }
+
+        fn update_settings(&mut self, _key: &str, _val: Value) -> bool {
+            true
+        }
+
+        fn get_info(&self) -> Value {
+            serde_json::json!({})
+        }
+
+        fn generate_input(
+            &mut self,
+            new_data: &[i16],
+            _input_size: usize,
+            _crossfade_size: usize,
+            _sola_search_frame: usize,
+        ) -> (Vec<i16>, Vec<i16>, Vec<i16>, usize, f32, usize) {
+            (
+                new_data.to_vec(),
+                Vec::new(),
+                Vec::new(),
+                new_data.len(),
+                0.0,
+                new_data.len(),
+            )
+        }
     }
+
+    impl VCModel for DummyModel {}
 
     #[test]
     fn sample_rate_methods() {
