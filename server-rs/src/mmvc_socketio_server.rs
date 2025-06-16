@@ -4,10 +4,10 @@ use axum::{
     routing::get,
     Router,
 };
+use base64::{engine::general_purpose, Engine as _};
 use futures_util::{SinkExt, StreamExt};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use base64::{engine::general_purpose, Engine as _};
 use tokio::sync::mpsc;
 
 use crate::voice_changer_manager::VoiceChangerManager;
@@ -110,12 +110,12 @@ impl MMVCSocketIOServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::Router;
     use axum::body::Body;
+    use axum::Router;
     use futures_util::StreamExt;
     use serde_json::{json, Value};
-    use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     use crate::voice_changer_params::VoiceChangerParams;
 
@@ -152,6 +152,8 @@ mod tests {
             whisper_tiny: "".into(),
         };
         let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
         MMVCSocketIOServer::new(manager).router()
     }
 
