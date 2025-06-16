@@ -120,8 +120,10 @@ mod tests {
     use serde_json::{json, Value};
     use tower::ServiceExt; // for `oneshot`
 
+    use crate::test_util::cleanup_test_dirs;
     use crate::voice_changer_params::VoiceChangerParams;
-    fn app() -> Router {
+    use serial_test::serial;
+    fn app() -> (Router, &'static VoiceChangerManager) {
         let params = VoiceChangerParams {
             model_dir: "m".into(),
             content_vec_500: "".into(),
@@ -141,12 +143,13 @@ mod tests {
         let manager = VoiceChangerManager::get_instance(params);
         #[cfg(test)]
         manager.reset();
-        MMVCRest::new(manager).router()
+        (MMVCRest::new(manager).router(), manager)
     }
 
     #[tokio::test]
+    #[serial]
     async fn hello_endpoint_returns_index() {
-        let app = app();
+        let (app, manager) = app();
         let response = app
             .oneshot(
                 Request::builder()
@@ -162,11 +165,14 @@ mod tests {
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["result"], "Index");
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_endpoint_echoes_payload() {
-        let app = app();
+        let (app, manager) = app();
         let samples = vec![1i16, -2i16];
         let bytes: Vec<u8> = samples.iter().flat_map(|x| x.to_le_bytes()).collect();
         let encoded = general_purpose::STANDARD.encode(&bytes);
@@ -188,5 +194,7 @@ mod tests {
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["timestamp"], 123);
         assert_eq!(v["changed_voice_base64"], encoded);
+        manager.reset();
+        cleanup_test_dirs();
     }
 }

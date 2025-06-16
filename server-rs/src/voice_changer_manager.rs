@@ -305,11 +305,7 @@ mod tests {
     #[test]
     fn load_model_moves_files() {
         let dir_path = Path::new("m");
-        std::fs::create_dir_all(dir_path).unwrap();
         let upload_dir = Path::new("upload_dir");
-        std::fs::create_dir_all(upload_dir).unwrap();
-        let src = upload_dir.join("model.pth");
-        std::fs::write(&src, b"dummy").unwrap();
 
         let params = VoiceChangerParams {
             model_dir: dir_path.to_str().unwrap().into(),
@@ -330,6 +326,11 @@ mod tests {
         let manager = VoiceChangerManager::get_instance(params);
         #[cfg(test)]
         manager.reset();
+
+        std::fs::create_dir_all(dir_path).unwrap();
+        std::fs::create_dir_all(upload_dir).unwrap();
+        let src = upload_dir.join("model.pth");
+        std::fs::write(&src, b"dummy").unwrap();
 
         let req = LoadModelRequest {
             voice_changer_type: "RVC".into(),

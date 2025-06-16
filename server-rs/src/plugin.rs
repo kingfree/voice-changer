@@ -1,4 +1,4 @@
-pub use crate::rvc::VCModel;
+pub use crate::rvc::{VCModel, VoiceChangerModel};
 use crate::model_slot::ModelSlot;
 use crate::voice_changer_params::VoiceChangerParams;
 

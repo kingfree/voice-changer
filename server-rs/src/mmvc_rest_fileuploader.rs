@@ -278,9 +278,11 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::mmvc_rest::MMVCRest;
+    use crate::test_util::cleanup_test_dirs;
     use crate::voice_changer_params::VoiceChangerParams; // for constructing manager
+    use serial_test::serial;
 
-    fn app() -> Router {
+    fn app() -> (Router, &'static VoiceChangerManager) {
         let params = VoiceChangerParams {
             model_dir: "m".into(),
             content_vec_500: "".into(),
@@ -300,12 +302,13 @@ mod tests {
         let manager = VoiceChangerManager::get_instance(params);
         #[cfg(test)]
         manager.reset();
-        MMVCRestFileuploader::new(manager).router()
+        (MMVCRestFileuploader::new(manager).router(), manager)
     }
 
     #[tokio::test]
+    #[serial]
     async fn info_endpoint_returns_status() {
-        let app = app();
+        let (app, manager) = app();
         let response = app
             .oneshot(
                 Request::builder()
@@ -321,11 +324,14 @@ mod tests {
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["status"], "OK");
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]
+    #[serial]
     async fn update_settings_endpoint_changes_value() {
-        let app = app();
+        let (app, manager) = app();
         let payload = "key=modelSlotIndex&val=1";
         let response = app
             .oneshot(
@@ -342,6 +348,154 @@ mod tests {
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["settings"]["model_slot_index"], 1);
+        manager.reset();
+        cleanup_test_dirs();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn performance_endpoint_returns_values() {
+        let (app, manager) = app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/performance")
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["status"], "OK");
+        assert!(v["performance"].as_array().unwrap().len() >= 3);
+        manager.reset();
+        cleanup_test_dirs();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn onnx_endpoint_exports_model() {
+        let (app, manager) = app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/onnx")
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert!(v["exported"].as_bool().unwrap());
+        manager.reset();
+        cleanup_test_dirs();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn upload_and_concat_files() {
+        use hyper::header::{HeaderValue, CONTENT_TYPE};
+        let (app, manager) = app();
+
+        let boundary = "BOUNDARY";
+        // upload first chunk
+        let body = format!(
+            "--{b}\r\nContent-Disposition: form-data; name=\"filename\"\r\n\r\nfinal.txt_0\r\n--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"final.txt_0\"\r\nContent-Type: application/octet-stream\r\n\r\nhello\r\n--{b}--\r\n",
+            b = boundary
+        );
+        let req = Request::builder()
+            .uri("/upload_file")
+            .method("POST")
+            .header(
+                CONTENT_TYPE,
+                HeaderValue::from_str(&format!("multipart/form-data; boundary={}", boundary))
+                    .unwrap(),
+            )
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // upload second chunk
+        let body = format!(
+            "--{b}\r\nContent-Disposition: form-data; name=\"filename\"\r\n\r\nfinal.txt_1\r\n--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"final.txt_1\"\r\nContent-Type: application/octet-stream\r\n\r\nworld\r\n--{b}--\r\n",
+            b = boundary
+        );
+        let req = Request::builder()
+            .uri("/upload_file")
+            .method("POST")
+            .header(
+                CONTENT_TYPE,
+                HeaderValue::from_str(&format!("multipart/form-data; boundary={}", boundary))
+                    .unwrap(),
+            )
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // concat chunks
+        let payload = "filename=final.txt&filenameChunkNum=2";
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/concat_uploaded_file")
+                    .method("POST")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let target = std::path::Path::new(UPLOAD_DIR).join("final.txt");
+        let content = tokio::fs::read_to_string(&target).await.unwrap();
+        assert_eq!(content, "helloworld");
+        manager.reset();
+        cleanup_test_dirs();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn merge_model_endpoint_creates_file() {
+        use serde_json::json;
+        let (app, manager) = app();
+        let f1 = std::path::Path::new(crate::constants::TMP_DIR).join("ma.txt");
+        let f2 = std::path::Path::new(crate::constants::TMP_DIR).join("mb.txt");
+        tokio::fs::create_dir_all(crate::constants::TMP_DIR)
+            .await
+            .unwrap();
+        tokio::fs::write(&f1, b"a").await.unwrap();
+        tokio::fs::write(&f2, b"b").await.unwrap();
+        let req = json!({
+            "output": "res.txt",
+            "files": [f1.to_str().unwrap(), f2.to_str().unwrap()]
+        });
+        let payload = format!("request={}", req.to_string());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/merge_model")
+                    .method("POST")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let out = std::path::Path::new(crate::constants::TMP_DIR).join("res.txt");
+        assert!(out.exists());
+        let content = tokio::fs::read_to_string(&out).await.unwrap();
+        assert_eq!(content, "ab");
+        manager.reset();
+        cleanup_test_dirs();
     }
 
     #[tokio::test]

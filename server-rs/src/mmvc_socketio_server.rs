@@ -115,6 +115,7 @@ mod tests {
     use axum::Router;
     use futures_util::StreamExt;
     use serde_json::{json, Value};
+    use serial_test::serial;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
@@ -135,7 +136,8 @@ mod tests {
         addr
     }
 
-    fn app() -> Router {
+    use crate::test_util::cleanup_test_dirs;
+    fn app() -> (Router, &'static VoiceChangerManager) {
         let params = VoiceChangerParams {
             model_dir: "m".into(),
             content_vec_500: "".into(),
@@ -155,12 +157,13 @@ mod tests {
         let manager = VoiceChangerManager::get_instance(params);
         #[cfg(test)]
         manager.reset();
-        MMVCSocketIOServer::new(manager).router()
+        (MMVCSocketIOServer::new(manager).router(), manager)
     }
 
     #[tokio::test]
+    #[serial]
     async fn websocket_returns_changed_voice() {
-        let app = app();
+        let (app, manager) = app();
         let addr = start_server(app).await;
         let url = format!("ws://{}/ws", addr);
         let (mut ws_stream, _) = connect_async(url).await.unwrap();
@@ -178,5 +181,8 @@ mod tests {
         } else {
             panic!("no response");
         }
+
+        manager.reset();
+        cleanup_test_dirs();
     }
 }
