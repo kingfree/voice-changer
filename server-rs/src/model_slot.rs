@@ -2,8 +2,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use crate::constants::UPLOAD_DIR;
+/// Maximum number of dynamic model slots.
+const MAX_SLOT_NUM: usize = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelSlot {
@@ -29,11 +32,27 @@ impl Default for RVCModelSlot {
 
 pub struct ModelSlotManager {
     model_dir: String,
+    slots: RwLock<Vec<ModelSlot>>, 
 }
 
 impl ModelSlotManager {
     pub fn new(model_dir: String) -> Self {
-        Self { model_dir }
+        let mgr = Self {
+            model_dir,
+            slots: RwLock::new(Vec::new()),
+        };
+        mgr.reload_slots();
+        mgr
+    }
+
+    fn reload_slots(&self) {
+        let mut vec = Vec::new();
+        for i in 0..MAX_SLOT_NUM {
+            vec.push(self.load_model_slot(i).unwrap_or(ModelSlot::Empty));
+        }
+        if let Ok(mut guard) = self.slots.write() {
+            *guard = vec;
+        }
     }
 
     fn slot_path(&self, slot: usize) -> PathBuf {
@@ -45,7 +64,16 @@ impl ModelSlotManager {
         fs::create_dir_all(&dir)?;
         let path = dir.join("params.json");
         let text = serde_json::to_string(info).unwrap();
-        fs::write(path, text)
+        fs::write(path, text)?;
+        if let Ok(mut slots) = self.slots.write() {
+            if slot >= slots.len() {
+                slots.resize(slot + 1, ModelSlot::Empty);
+            }
+            if let Some(s) = slots.get_mut(slot) {
+                *s = info.clone();
+            }
+        }
+        Ok(())
     }
 
     pub fn load_model_slot(&self, slot: usize) -> Option<ModelSlot> {
@@ -84,7 +112,9 @@ impl ModelSlotManager {
             },
             _ => {}
         }
-        self.save_model_slot(slot, &info)
+        self.save_model_slot(slot, &info)?;
+        self.reload_slots();
+        Ok(())
     }
 
     pub fn store_model_assets(&self, params: &str) -> std::io::Result<()> {
@@ -120,7 +150,28 @@ impl ModelSlotManager {
             },
             _ => {}
         }
-        self.save_model_slot(slot, &info)
+        self.save_model_slot(slot, &info)?;
+        self.reload_slots();
+        Ok(())
+    }
+
+    /// Return all slot information, optionally reloading from disk.
+    pub fn get_all_slot_info(&self, reload: bool) -> Vec<ModelSlot> {
+        if reload {
+            self.reload_slots();
+        }
+        self.slots
+            .read()
+            .map(|v| v.clone())
+            .unwrap_or_else(|_| Vec::new())
+    }
+
+    /// Retrieve a single slot by index.
+    pub fn get_slot_info(&self, slot: usize) -> Option<ModelSlot> {
+        self.slots
+            .read()
+            .ok()
+            .and_then(|v| v.get(slot).cloned())
     }
 }
 
@@ -187,5 +238,10 @@ mod tests {
             ModelSlot::RVC(r) => assert_eq!(r.model_file, "test.txt"),
             _ => panic!("invalid"),
         }
+
+        let all = manager.get_all_slot_info(false);
+        assert_eq!(all.len(), MAX_SLOT_NUM);
+
+        assert!(matches!(manager.get_slot_info(0), Some(ModelSlot::RVC(_))));
     }
 }

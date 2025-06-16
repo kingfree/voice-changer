@@ -6,11 +6,73 @@
 
 use std::f32;
 
+/// Information about a [`VolumeExtractor`] instance returned by
+/// [`VolumeExtractor::get_volume_extractor_info`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VolumeExtractorInfo {
+    /// Hop size used for analysis.
+    pub hop_size: usize,
+}
+
+/// Rust translation of the Python `VolumeExtractor` class.
+///
+/// The Python implementation relied on PyTorch tensors.  This struct provides
+/// equivalent functionality using safe Rust code.
+#[derive(Debug, Clone)]
+pub struct VolumeExtractor {
+    hop_size: usize,
+}
+
+impl VolumeExtractor {
+    /// Create a new extractor configured with the given `hop_size`.
+    pub fn new(hop_size: usize) -> Self {
+        Self { hop_size }
+    }
+
+    /// Return the extractor configuration.
+    pub fn get_volume_extractor_info(&self) -> VolumeExtractorInfo {
+        VolumeExtractorInfo {
+            hop_size: self.hop_size,
+        }
+    }
+
+    /// Extract per-frame RMS volumes from an audio signal.
+    pub fn extract(&self, audio: &[f32]) -> Vec<f32> {
+        extract_impl(audio, self.hop_size)
+    }
+
+    /// Sliding RMS variant matching the Python `extract_t` method.
+    pub fn extract_t(&self, audio: &[f32]) -> Vec<f32> {
+        self.extract(audio)
+    }
+
+    /// Generate a voice activity mask from volume values.
+    pub fn get_mask_from_volume(
+        &self,
+        volume: &[f32],
+        block_size: usize,
+        threshold: f32,
+    ) -> Vec<f32> {
+        get_mask_from_volume_impl(volume, block_size, threshold)
+    }
+
+    /// Equivalent to `get_mask_from_volume` but kept for parity with the
+    /// Python code's `get_mask_from_volume_t`.
+    pub fn get_mask_from_volume_t(
+        &self,
+        volume: &[f32],
+        block_size: usize,
+        threshold: f32,
+    ) -> Vec<f32> {
+        self.get_mask_from_volume(volume, block_size, threshold)
+    }
+}
+
 /// Extract per-frame RMS volumes from an audio signal.
 ///
 /// `audio` should be a mono signal. `hop_size` defines the frame
 /// spacing in samples.
-pub fn extract(audio: &[f32], hop_size: usize) -> Vec<f32> {
+fn extract_impl(audio: &[f32], hop_size: usize) -> Vec<f32> {
     if hop_size == 0 {
         return Vec::new();
     }
@@ -30,17 +92,17 @@ pub fn extract(audio: &[f32], hop_size: usize) -> Vec<f32> {
     out
 }
 
-/// Sliding RMS using the same algorithm as [`extract`] but expecting an
+/// Sliding RMS using the same algorithm as [`VolumeExtractor::extract`] but expecting an
 /// owned vector so the function can operate in place.
-pub fn extract_t(audio: &[f32], hop_size: usize) -> Vec<f32> {
-    extract(audio, hop_size)
+fn extract_t_impl(audio: &[f32], hop_size: usize) -> Vec<f32> {
+    extract_impl(audio, hop_size)
 }
 
 /// Generate a voice activity mask from volume values.
 ///
 /// `block_size` specifies the upsample factor used by the caller.
 /// `threshold` is in dB.
-pub fn get_mask_from_volume(volume: &[f32], block_size: usize, threshold: f32) -> Vec<f32> {
+fn get_mask_from_volume_impl(volume: &[f32], block_size: usize, threshold: f32) -> Vec<f32> {
     let db_threshold = 10f32.powf(threshold / 20.0);
     let mut mask: Vec<f32> = volume
         .iter()
@@ -88,14 +150,18 @@ mod tests {
     #[test]
     fn test_extract_basic() {
         let audio = vec![0.0f32; 480];
-        let v = extract(&audio, 160);
+        let ext = VolumeExtractor::new(160);
+        let v = ext.extract(&audio);
         assert_eq!(v.len(), 4); // 480/160 + 1
+        let info = ext.get_volume_extractor_info();
+        assert_eq!(info.hop_size, 160);
     }
 
     #[test]
     fn test_mask_generation() {
         let volume = vec![0.0, 0.5, 0.0, 0.5];
-        let mask = get_mask_from_volume(&volume, 2, -6.0);
+        let ext = VolumeExtractor::new(1);
+        let mask = ext.get_mask_from_volume(&volume, 2, -6.0);
         // Should upsample to (len + pad -8)*factor = (??). For this simple test,
         // just verify output length.
         assert!(!mask.is_empty());
