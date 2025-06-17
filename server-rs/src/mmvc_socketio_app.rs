@@ -23,7 +23,6 @@ impl MMVCSocketIOApp {
         };
 
         let router = rest_router
-            .layer(socket_layer)
             .nest_service("/front", serve_front(frontend.clone()))
             .nest_service("/trainer", serve_front(frontend.clone()))
             .nest_service("/recorder", serve_front(frontend.clone()))
@@ -40,12 +39,71 @@ impl MMVCSocketIOApp {
                 "/model_dir_static",
                 serve_front(std::path::PathBuf::from(MODEL_DIR_STATIC)),
             )
-            .fallback_service(serve_front(frontend));
+            .fallback_service(serve_front(frontend))
+            .layer(socket_layer);
 
         Self { router }
     }
 
     pub fn router(self) -> Router {
         self.router
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        Router,
+    };
+    use serial_test::serial;
+    use tower::ServiceExt;
+
+    use crate::{
+        mmvc_rest::MMVCRest, test_util::cleanup_test_dirs, voice_changer_params::VoiceChangerParams,
+    };
+
+    fn app() -> (Router, &'static VoiceChangerManager) {
+        let params = VoiceChangerParams {
+            model_dir: "m".into(),
+            content_vec_500: "".into(),
+            content_vec_500_onnx: "".into(),
+            content_vec_500_onnx_on: false,
+            hubert_base: "".into(),
+            hubert_base_jp: "".into(),
+            hubert_soft: "".into(),
+            nsf_hifigan: "".into(),
+            sample_mode: "".into(),
+            crepe_onnx_full: "".into(),
+            crepe_onnx_tiny: "".into(),
+            rmvpe: "".into(),
+            rmvpe_onnx: "".into(),
+            whisper_tiny: "".into(),
+        };
+        let manager = VoiceChangerManager::get_instance(params);
+        #[cfg(test)]
+        manager.reset();
+        let rest = MMVCRest::new(manager);
+        (
+            MMVCSocketIOApp::new(rest.router(), manager).router(),
+            manager,
+        )
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn socketio_endpoint_available() {
+        let (app, manager) = app();
+        let req = Request::builder()
+            .uri("/socket.io/?EIO=4&transport=polling&t=0")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        manager.reset();
+        cleanup_test_dirs();
     }
 }
