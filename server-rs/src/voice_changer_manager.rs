@@ -3,12 +3,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use crate::constants::STORED_SETTING_FILE;
 use crate::model_slot::{ModelSlot, ModelSlotManager, RVCModelSlot};
-use crate::plugin::VCModelPlugin;
-use crate::rvc::RvcPlugin;
 use crate::voice_changer::VoiceChanger;
 
 use crate::voice_changer_params::VoiceChangerParams;
@@ -63,7 +61,6 @@ pub struct VoiceChangerManager {
     emit_callback: RwLock<Option<Box<dyn Fn(Vec<f32>) + Send + Sync>>>,
     voice_changer: VoiceChanger,
     stored_setting: RwLock<HashMap<String, Value>>,
-    plugins: RwLock<HashMap<String, Arc<dyn VCModelPlugin>>>,
     current_slot: RwLock<Option<ModelSlot>>,
     model_slot_manager: ModelSlotManager,
 }
@@ -81,11 +78,9 @@ impl VoiceChangerManager {
                 emit_callback: RwLock::new(None),
                 voice_changer: VoiceChanger::new(),
                 stored_setting: RwLock::new(HashMap::new()),
-                plugins: RwLock::new(HashMap::new()),
                 current_slot: RwLock::new(None),
                 model_slot_manager: msm,
             };
-            m.register_plugin(RvcPlugin);
             m.load_stored_settings();
             m
         })
@@ -128,14 +123,9 @@ impl VoiceChangerManager {
             if let Ok(mut cur) = self.current_slot.write() {
                 *cur = Some(slot.clone());
             }
-            if let Some(plugin) = self
-                .plugins
-                .read()
-                .ok()
-                .and_then(|map| map.get(&params.voice_changer_type).cloned())
-            {
-                let model = plugin.create_model(&self.params, &slot);
-                self.voice_changer.set_model_box(model);
+            if params.voice_changer_type == "RVC" {
+                let model = crate::rvc::Rvc::new(48000, path.clone());
+                self.voice_changer.set_model(model);
             }
         }
 
@@ -234,12 +224,6 @@ impl VoiceChangerManager {
 }
 
 impl VoiceChangerManager {
-    pub fn register_plugin<P: VCModelPlugin + 'static>(&mut self, plugin: P) {
-        if let Ok(mut map) = self.plugins.write() {
-            map.insert(plugin.name().to_string(), Arc::new(plugin));
-        }
-    }
-
     pub fn get_processing_sampling_rate(&self) -> i32 {
         self.voice_changer.get_processing_sampling_rate()
     }
@@ -301,8 +285,10 @@ impl VoiceChangerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn load_model_moves_files() {
         let dir_path = Path::new("m");
         let upload_dir = Path::new("upload_dir");
@@ -349,12 +335,13 @@ mod tests {
         let dst = dir_path.join("0").join("model.pth");
         assert!(dst.exists());
 
-        // plugin should set processing sample rate via RVC plugin
+        // model should set processing sample rate via RVC implementation
         let rate = manager.get_processing_sampling_rate();
         assert_eq!(rate, 48000);
     }
 
     #[test]
+    #[serial]
     fn export_to_onnx_creates_file() {
         let params = VoiceChangerParams {
             model_dir: "m".into(),
@@ -383,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn merge_models_creates_output() {
         use serde_json::json;
         let params = VoiceChangerParams {
@@ -426,6 +414,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn update_model_methods_modify_performance() {
         let params = VoiceChangerParams {
             model_dir: "m".into(),

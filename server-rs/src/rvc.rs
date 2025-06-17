@@ -17,6 +17,12 @@ pub trait VoiceChangerModel: Send + Sync {
         crossfade_size: usize,
         sola_search_frame: usize,
     ) -> (Vec<i16>, Vec<i16>, Vec<i16>, usize, f32, usize);
+
+    /// Export the model to ONNX and return the file path.
+    fn export_to_onnx(&self) -> std::io::Result<String>;
+
+    /// Retrieve the current model settings as key/value pairs.
+    fn get_model_current(&self) -> Vec<Value>;
 }
 
 /// Marker trait used throughout the Rust server implementation.  It extends
@@ -24,9 +30,6 @@ pub trait VoiceChangerModel: Send + Sync {
 pub trait VCModel: VoiceChangerModel {}
 
 use crate::constants::TMP_DIR;
-use crate::model_slot::ModelSlot;
-use crate::plugin::VCModelPlugin;
-use crate::voice_changer_params::VoiceChangerParams;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -238,24 +241,17 @@ impl VoiceChangerModel for Rvc {
             input_size + crossfade_size,
         )
     }
+
+    fn export_to_onnx(&self) -> std::io::Result<String> {
+        Rvc::export_to_onnx(self)
+    }
+
+    fn get_model_current(&self) -> Vec<Value> {
+        Rvc::get_model_current(self)
+    }
 }
 
 impl VCModel for Rvc {}
-
-pub struct RvcPlugin;
-
-impl VCModelPlugin for RvcPlugin {
-    fn name(&self) -> &str {
-        "RVC"
-    }
-
-    fn create_model(&self, _params: &VoiceChangerParams, slot: &ModelSlot) -> Box<dyn VCModel> {
-        match slot {
-            ModelSlot::RVC(info) => Box::new(Rvc::new(info.sampling_rate, info.model_file.clone())),
-            _ => Box::new(Rvc::new(48000, String::new())),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

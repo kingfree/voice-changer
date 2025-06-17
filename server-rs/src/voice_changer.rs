@@ -346,6 +346,14 @@ mod tests {
                 new_data.len(),
             )
         }
+
+        fn export_to_onnx(&self) -> std::io::Result<String> {
+            Ok(String::from("dummy.onnx"))
+        }
+
+        fn get_model_current(&self) -> Vec<Value> {
+            Vec::new()
+        }
     }
 
     impl VCModel for DummyModel {}
