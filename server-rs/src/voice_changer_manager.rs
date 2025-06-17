@@ -174,16 +174,46 @@ impl VoiceChangerManager {
 
     pub fn get_info(&self) -> serde_json::Value {
         let settings = match self.settings.read() {
-            Ok(s) => s,
+            Ok(s) => serde_json::to_value(&*s).unwrap_or_default(),
             Err(_) => return json!({"status": "ERR"}),
         };
-        let vc_info = self.voice_changer.get_info();
-        json!({
-            "status": "OK",
-            "settings": &*settings,
-            "voiceChanger": vc_info,
-            "modelPath": self.model_path.read().ok().and_then(|v| v.clone()),
-        })
+        let vc_info = serde_json::to_value(self.voice_changer.get_info()).unwrap_or_default();
+
+        let mut map = settings.as_object().cloned().unwrap_or_default();
+
+        // GPU information is not yet implemented in Rust
+        map.insert("gpus".into(), Value::Array(Vec::new()));
+        map.insert(
+            "modelSlots".into(),
+            serde_json::to_value(self.model_slot_manager.get_all_slot_info(true)).unwrap(),
+        );
+        // Sample model metadata is currently unavailable
+        map.insert("sampleModels".into(), Value::Array(Vec::new()));
+        map.insert(
+            "python".into(),
+            Value::String(format!("Rust {}", env!("CARGO_PKG_VERSION"))),
+        );
+        map.insert(
+            "voiceChangerParams".into(),
+            serde_json::to_value(&self.params).unwrap_or_default(),
+        );
+        map.insert(
+            "modelPath".into(),
+            self.model_path
+                .read()
+                .ok()
+                .and_then(|v| v.clone())
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+
+        for (k, v) in vc_info.as_object().cloned().unwrap_or_default() {
+            map.insert(k, v);
+        }
+
+        map.insert("status".into(), Value::String("OK".into()));
+
+        Value::Object(map)
     }
 
     pub fn export_to_onnx(&self) -> bool {
