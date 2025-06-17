@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
 };
 use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};
@@ -135,21 +135,30 @@ async fn get_performance() -> Json<Value> {
     Json(manager.get_performance())
 }
 
-#[derive(Deserialize)]
-struct UpdateParams {
-    /// Setting key to update.
-    key: String,
-    /// New value as JSON or plain string.
-    val: String,
-}
-
 /// `POST /update_settings`
 ///
-/// Update global settings by key.
-async fn post_update_settings(Form(params): Form<UpdateParams>) -> Json<Value> {
+/// Update global settings by key. Unlike [`Form`], FastAPI's `Form` extractor
+/// accepts both `application/x-www-form-urlencoded` and `multipart/form-data`.
+/// To mirror that behaviour we manually parse a multipart request.
+async fn post_update_settings(mut multipart: Multipart) -> Json<Value> {
     let manager = MANAGER.get().expect("manager not set");
-    let val: Value = serde_json::from_str(&params.val).unwrap_or(Value::String(params.val));
-    Json(manager.update_settings(&params.key, val))
+    let mut key: Option<String> = None;
+    let mut val: Option<String> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        match field.name() {
+            Some("key") => key = Some(field.text().await.unwrap_or_default()),
+            Some("val") => val = Some(field.text().await.unwrap_or_default()),
+            _ => {}
+        }
+    }
+
+    if let (Some(key), Some(val)) = (key, val) {
+        let value: Value = serde_json::from_str(&val).unwrap_or(Value::String(val));
+        Json(manager.update_settings(&key, value))
+    } else {
+        Json(json!({"status": "ERROR", "msg": "invalid params"}))
+    }
 }
 
 #[derive(Deserialize)]
@@ -331,19 +340,27 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn update_settings_endpoint_changes_value() {
+        use hyper::header::{HeaderValue, CONTENT_TYPE};
         let (app, manager) = app();
-        let payload = "key=modelSlotIndex&val=1";
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/update_settings")
-                    .header("content-type", "application/x-www-form-urlencoded")
-                    .method("POST")
-                    .body(Body::from(payload))
+
+        let boundary = "BOUNDARY";
+        let body = format!(
+            "--{b}\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nmodelSlotIndex\r\n--{b}\r\nContent-Disposition: form-data; name=\"val\"\r\n\r\n1\r\n--{b}--\r\n",
+            b = boundary
+        );
+
+        let req = Request::builder()
+            .uri("/update_settings")
+            .method("POST")
+            .header(
+                CONTENT_TYPE,
+                HeaderValue::from_str(&format!("multipart/form-data; boundary={}", boundary))
                     .unwrap(),
             )
-            .await
+            .body(Body::from(body))
             .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
@@ -497,5 +514,4 @@ mod tests {
         manager.reset();
         cleanup_test_dirs();
     }
-
 }
