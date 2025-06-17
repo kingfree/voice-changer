@@ -5,22 +5,16 @@
 //! clients.  Each handler is documented so `cargo doc` can generate API
 //! documentation for the HTTP routes.
 
-use axum::{
-    routing::{get, post},
-    Json, Router,
-};
+use axum::{routing::get, Json, Router};
 #[path = "mmvc_rest_fileuploader.rs"]
 mod mmvc_rest_fileuploader;
+#[path = "mmvc_rest_voice_changer.rs"]
+mod mmvc_rest_voice_changer;
 use crate::voice_changer_manager::VoiceChangerManager;
 use base64::{engine::general_purpose, Engine as _};
 use mmvc_rest_fileuploader::MMVCRestFileuploader;
-use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-static MANAGER: OnceCell<&'static VoiceChangerManager> = OnceCell::new();
-static LOCK: OnceCell<Arc<Mutex<()>>> = OnceCell::new();
+use mmvc_rest_voice_changer::MMVCRestVoiceChanger;
+use serde::Serialize;
 
 /// Response for [`hello`] endpoint.
 #[derive(Serialize)]
@@ -36,52 +30,6 @@ async fn hello() -> Json<Hello> {
     Json(Hello { result: "Index" })
 }
 
-/// Request payload for [`test()`] endpoint.
-#[derive(Deserialize)]
-struct VoiceModel {
-    /// Arbitrary timestamp used by the caller.
-    timestamp: u64,
-    /// Little endian 16‑bit PCM samples encoded as base64.
-    buffer: String,
-}
-
-/// Response payload for [`test()`].
-#[derive(Serialize)]
-struct TestResponse {
-    /// Echoed timestamp from the request.
-    timestamp: u64,
-    /// Converted voice samples encoded as base64.
-    changed_voice_base64: String,
-}
-
-/// `POST /test`
-///
-/// Accepts base64 encoded audio samples and returns the modified voice.
-async fn test(Json(payload): Json<VoiceModel>) -> Json<TestResponse> {
-    let manager = MANAGER.get().expect("manager not set");
-    let lock = LOCK.get().expect("lock not set");
-    let bytes = match general_purpose::STANDARD.decode(&payload.buffer) {
-        Ok(b) => b,
-        Err(_) => Vec::new(),
-    };
-    let mut samples = Vec::with_capacity(bytes.len() / 2);
-    for chunk in bytes.chunks_exact(2) {
-        samples.push(i16::from_le_bytes([chunk[0], chunk[1]]));
-    }
-    let _guard = lock.lock().await;
-    let changed = manager.change_voice(&samples);
-    drop(_guard);
-    let mut out_bytes = Vec::with_capacity(changed.len() * 2);
-    for s in changed {
-        out_bytes.extend_from_slice(&s.to_le_bytes());
-    }
-    let encoded = general_purpose::STANDARD.encode(out_bytes);
-    Json(TestResponse {
-        timestamp: payload.timestamp,
-        changed_voice_base64: encoded,
-    })
-}
-
 /// REST API application.
 ///
 /// Use [`MMVCRest::new`] to create a router that exposes the HTTP endpoints
@@ -93,12 +41,11 @@ pub struct MMVCRest {
 impl MMVCRest {
     /// Construct a new [`MMVCRest`] using the provided manager instance.
     pub fn new(manager: &'static VoiceChangerManager) -> Self {
-        MANAGER.set(manager).ok();
-        LOCK.set(Arc::new(Mutex::new(()))).ok();
         let file_router = MMVCRestFileuploader::new(manager).router();
+        let vc_router = MMVCRestVoiceChanger::new(manager).router();
         let router = Router::new()
             .route("/api/hello", get(hello))
-            .route("/test", post(test))
+            .merge(vc_router)
             .merge(file_router);
         Self { router }
     }
