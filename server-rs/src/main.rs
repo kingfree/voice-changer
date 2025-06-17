@@ -7,8 +7,8 @@ use tracing_subscriber::EnvFilter;
 
 mod voice_changer_params;
 use voice_changer_params::VoiceChangerParams;
-mod model_slot;
 mod model_sample;
+mod model_slot;
 mod rvc;
 mod voice_changer;
 mod voice_changer_params_manager;
@@ -18,7 +18,6 @@ use voice_changer_manager::VoiceChangerManager;
 mod mmvc_rest;
 mod mmvc_socketio_app;
 mod mmvc_socketio_server;
-mod socketio_stub;
 mod volume_extractor;
 use mmvc_rest::MMVCRest;
 use mmvc_socketio_app::MMVCSocketIOApp;
