@@ -15,12 +15,10 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};
 
-use crate::voice_changer_manager::VoiceChangerManager;
-
-/// Directory used for temporarily storing uploaded chunks.
-const UPLOAD_DIR: &str = "upload_dir";
-/// Directory containing saved models.
-const MODEL_DIR: &str = "logs";
+use crate::{
+    constants::{MODEL_DIR, UPLOAD_DIR},
+    voice_changer_manager::VoiceChangerManager,
+};
 
 static MANAGER: OnceCell<&'static VoiceChangerManager> = OnceCell::new();
 
@@ -364,7 +362,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let v: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(v["settings"]["model_slot_index"], 1);
+        assert_eq!(v["model_slot_index"], 1);
         manager.reset();
         cleanup_test_dirs();
     }

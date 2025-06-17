@@ -5,10 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use crate::constants::MODEL_DIR_STATIC;
-use crate::constants::UPLOAD_DIR;
-/// Maximum number of dynamic model slots.
-const MAX_SLOT_NUM: usize = 10;
+use crate::constants::{MAX_SLOT_NUM, MODEL_DIR_STATIC, UPLOAD_DIR};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

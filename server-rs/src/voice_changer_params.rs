@@ -1,4 +1,6 @@
-#[derive(Debug, Clone)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
 pub struct VoiceChangerParams {
     pub model_dir: String,
     pub content_vec_500: String,

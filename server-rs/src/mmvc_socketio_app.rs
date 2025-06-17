@@ -1,5 +1,5 @@
 use axum::{http::StatusCode, response::IntoResponse, routing::get_service, Router};
-use tower_http::services::ServeDir;
+use tower_http::{services::ServeDir, trace::TraceLayer};
 
 use crate::{
     constants::{get_frontend_path, MODEL_DIR_STATIC, TMP_DIR, UPLOAD_DIR},
@@ -40,7 +40,8 @@ impl MMVCSocketIOApp {
                 serve_front(std::path::PathBuf::from(MODEL_DIR_STATIC)),
             )
             .fallback_service(serve_front(frontend))
-            .layer(socket_layer);
+            .layer(socket_layer)
+            .layer(TraceLayer::new_for_http());
 
         Self { router }
     }
