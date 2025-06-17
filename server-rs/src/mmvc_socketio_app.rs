@@ -1,15 +1,10 @@
-use axum::{
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get_service,
-    Router,
-};
+use axum::{http::StatusCode, response::IntoResponse, routing::get_service, Router};
 use tower_http::services::ServeDir;
 
 use crate::{
-    voice_changer_manager::VoiceChangerManager,
+    constants::{get_frontend_path, MODEL_DIR_STATIC, TMP_DIR, UPLOAD_DIR},
     mmvc_socketio_server::MMVCSocketIOServer,
-    constants::{get_frontend_path, TMP_DIR, UPLOAD_DIR, MODEL_DIR_STATIC},
+    voice_changer_manager::VoiceChangerManager,
 };
 
 pub struct MMVCSocketIOApp {
@@ -18,7 +13,7 @@ pub struct MMVCSocketIOApp {
 
 impl MMVCSocketIOApp {
     pub fn new(rest_router: Router, manager: &'static VoiceChangerManager) -> Self {
-        let socket_router = MMVCSocketIOServer::new(manager).router();
+        let socket_layer = MMVCSocketIOServer::new(manager).layer();
 
         // static file serving similar to the Python implementation
         let frontend = get_frontend_path();
@@ -28,7 +23,7 @@ impl MMVCSocketIOApp {
         };
 
         let router = rest_router
-            .merge(socket_router)
+            .layer(socket_layer)
             .nest_service("/front", serve_front(frontend.clone()))
             .nest_service("/trainer", serve_front(frontend.clone()))
             .nest_service("/recorder", serve_front(frontend.clone()))
