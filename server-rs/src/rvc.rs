@@ -30,9 +30,6 @@ pub trait VoiceChangerModel: Send + Sync {
 pub trait VCModel: VoiceChangerModel {}
 
 use crate::constants::TMP_DIR;
-use crate::model_slot::ModelSlot;
-use crate::plugin::VCModelPlugin;
-use crate::voice_changer_params::VoiceChangerParams;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -255,21 +252,6 @@ impl VoiceChangerModel for Rvc {
 }
 
 impl VCModel for Rvc {}
-
-pub struct RvcPlugin;
-
-impl VCModelPlugin for RvcPlugin {
-    fn name(&self) -> &str {
-        "RVC"
-    }
-
-    fn create_model(&self, _params: &VoiceChangerParams, slot: &ModelSlot) -> Box<dyn VCModel> {
-        match slot {
-            ModelSlot::RVC(info) => Box::new(Rvc::new(info.sampling_rate, info.model_file.clone())),
-            _ => Box::new(Rvc::new(48000, String::new())),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
