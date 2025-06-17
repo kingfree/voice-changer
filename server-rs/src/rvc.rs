@@ -34,6 +34,46 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
 
+/// Simplified pipeline executing the model.  In this Rust port the pipeline
+/// merely echoes input audio back without modification.
+struct Pipeline {
+    sample_rate: i32,
+}
+
+impl Pipeline {
+    fn new(sample_rate: i32) -> Self {
+        Self { sample_rate }
+    }
+
+    /// Very simple pitch shifting by resampling the input audio.
+    /// The implementation uses plain CPU interpolation and does not
+    /// rely on external libraries such as Torch.
+    fn exec(&self, audio: &[i16], semitone: i32) -> Vec<i16> {
+        if semitone == 0 {
+            return audio.to_vec();
+        }
+
+        let ratio = 2f64.powf(semitone as f64 / 12.0);
+        let out_len = ((audio.len() as f64) / ratio).round() as usize;
+        if out_len == 0 {
+            return Vec::new();
+        }
+
+        let mut out = Vec::with_capacity(out_len);
+        for i in 0..out_len {
+            let pos = i as f64 * ratio;
+            let idx0 = pos.floor() as usize;
+            let idx1 = (idx0 + 1).min(audio.len() - 1);
+            let frac = pos - idx0 as f64;
+            let base = audio[idx0] as f64;
+            let next = audio[idx1] as f64;
+            let value = base * (1.0 - frac) + next * frac;
+            out.push(value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16);
+        }
+        out
+    }
+}
+
 /// Runtime settings mirrored from the Python `RVCSettings` dataclass.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RvcSettings {
@@ -82,6 +122,7 @@ pub struct Rvc {
     path: String,
     settings: RvcSettings,
     audio_buffer: Vec<i16>,
+    pipeline: Option<Pipeline>,
 }
 
 impl Rvc {
@@ -91,7 +132,15 @@ impl Rvc {
             path,
             settings: RvcSettings::default(),
             audio_buffer: Vec::new(),
+            pipeline: None,
         }
+    }
+
+    /// Initialize the model pipeline.  The real implementation would load
+    /// neural network weights and prepare GPU resources.  Here we simply create
+    /// a dummy pipeline instance that echoes audio back.
+    pub fn initialize(&mut self) {
+        self.pipeline = Some(Pipeline::new(self.sample_rate));
     }
 
     /// Update runtime settings from a JSON key/value pair.
@@ -187,7 +236,10 @@ impl VoiceChangerModel for Rvc {
     }
 
     fn inference(&self, input: &[i16]) -> Vec<i16> {
-        input.to_vec()
+        match &self.pipeline {
+            Some(p) => p.exec(input, self.settings.tran),
+            None => input.to_vec(),
+        }
     }
 
     fn update_settings(&mut self, key: &str, val: Value) -> bool {
@@ -286,6 +338,36 @@ mod tests {
         let cur = r.get_model_current();
         assert_eq!(cur.len(), 3);
         assert_eq!(cur[0]["key"], "defaultTune");
+        cleanup_test_dirs();
+    }
+
+    #[test]
+    #[serial]
+    fn initialize_and_infer() {
+        let mut r = Rvc::new(48000, String::new());
+        r.initialize();
+        let result = r.inference(&[1, 2, 3]);
+        assert_eq!(result, vec![1, 3]);
+        cleanup_test_dirs();
+    }
+
+    #[test]
+    #[serial]
+    fn inference_without_init_returns_input() {
+        let r = Rvc::new(48000, String::new());
+        let out = r.inference(&[1, 2, 3]);
+        assert_eq!(out, vec![1, 2, 3]);
+        cleanup_test_dirs();
+    }
+
+    #[test]
+    #[serial]
+    fn inference_pitch_shift_down() {
+        let mut r = Rvc::new(48000, String::new());
+        r.initialize();
+        r.update_settings("tran", Value::from(-12));
+        let result = r.inference(&[1, 2, 3, 4]);
+        assert_eq!(result, vec![1, 2, 2, 3, 3, 4, 4, 4]);
         cleanup_test_dirs();
     }
 }

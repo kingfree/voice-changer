@@ -8,6 +8,7 @@ use tracing_subscriber::EnvFilter;
 mod voice_changer_params;
 use voice_changer_params::VoiceChangerParams;
 mod model_slot;
+mod model_sample;
 mod rvc;
 mod voice_changer;
 mod voice_changer_params_manager;

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use crate::constants::STORED_SETTING_FILE;
-use crate::model_slot::{ModelSlot, ModelSlotManager, RVCModelSlot};
+use crate::model_slot::{ModelSlot, ModelSlotEntry, ModelSlotManager, RVCModelSlot};
 use crate::voice_changer::VoiceChanger;
 
 use crate::voice_changer_params::VoiceChangerParams;
@@ -61,7 +61,7 @@ pub struct VoiceChangerManager {
     emit_callback: RwLock<Option<Box<dyn Fn(Vec<f32>) + Send + Sync>>>,
     voice_changer: VoiceChanger,
     stored_setting: RwLock<HashMap<String, Value>>,
-    current_slot: RwLock<Option<ModelSlot>>,
+    current_slot: RwLock<Option<ModelSlotEntry>>,
     model_slot_manager: ModelSlotManager,
 }
 
@@ -113,9 +113,11 @@ impl VoiceChangerManager {
             if let Ok(mut m) = self.model_path.write() {
                 *m = Some(path.clone());
             }
-            let slot = ModelSlot::RVC(RVCModelSlot {
+            let slot = ModelSlotEntry::RVC(RVCModelSlot {
+                base: ModelSlot::default(),
                 model_file: path.clone(),
                 sampling_rate: 48000,
+                ..RVCModelSlot::default()
             });
             let _ = self
                 .model_slot_manager
@@ -124,7 +126,8 @@ impl VoiceChangerManager {
                 *cur = Some(slot.clone());
             }
             if params.voice_changer_type == "RVC" {
-                let model = crate::rvc::Rvc::new(48000, path.clone());
+                let mut model = crate::rvc::Rvc::new(48000, path.clone());
+                model.initialize();
                 self.voice_changer.set_model(model);
             }
         }
