@@ -107,7 +107,7 @@ async fn post_concat_uploaded_file(Form(params): Form<ConcatParams>) -> Json<Val
     };
     for i in 0..params.filename_chunk_num {
         let chunk = PathBuf::from(UPLOAD_DIR).join(format!("{}_{}", safe_name, i));
-        if let Ok(mut cfile) = fs::File::open(&chunk).await {
+        if fs::File::open(&chunk).await.is_ok() {
             if let Ok(data) = fs::read(&chunk).await {
                 if out.write_all(&data).await.is_err() {
                     return Json(json!({"status":"ERROR","msg":"write"}));
